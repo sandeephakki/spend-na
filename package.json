@@ -1,0 +1,21 @@
+{
+  "name": "spend-na",
+  "version": "1.0.0",
+  "description": "PWA Spenda-na",
+  "main": "index.html",
+  "scripts": {
+    "start": "serve .",
+    "build": "echo 'No build step required for this PWA'",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "serve": "^14.2.1"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  }
+}

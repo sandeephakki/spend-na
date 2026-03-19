@@ -1,0 +1,32 @@
+{
+  "name": "Spend-na",
+  "short_name": "Spend-na",
+  "description": "Spend-na — Your money mirror. Every rupee has a story.",
+  "start_url": "/spend-na/",
+  "scope": "/spend-na/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "files/bird_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "files/AppIcon_1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "files/bird_512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
