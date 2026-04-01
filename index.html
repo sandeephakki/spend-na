@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v5.1
+  VERSION:        v5.2
   FILE:           index.html — single-file PWA, no build step
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
@@ -95,6 +95,7 @@
   sn_focus_level        '0'                  Text size: 0=default 1=comfortable 2=large
   sn_beta_prompted      null (session)       Beta banner shown (sessionStorage)
   sn_lock_until         null (session)       Lockout expiry (sessionStorage)
+  sn_tag_registry       {tags:[]}            Dynamic custom tag list with useCount + lastUsed
   sn_shard_YYYY_Mon     null                 Monthly tx shard — phase 2 only
 
 ════════════════════════════════════════════════════════════════
@@ -151,6 +152,9 @@
   SRC_DB          6355    load · save  (key: sn_sources)
   SHARD           6390    forMonth · months · manifest · exportMonth · writeCurrentMonthShard
   APP             6505    all UI methods — see section 8
+  _findHistoryMerchant    Before aiParseText    History-first bucket lookup (confidence 1–3)
+  TAG_REGISTRY    After PRESET_TAGS    _loadTagRegistry · _saveTagRegistry · recordTagUsage
+                                       pruneOldTags · getDynamicTagList · migrateTagsToRegistry
 
 ════════════════════════════════════════════════════════════════
 
@@ -180,6 +184,8 @@
   changePw()                8275    Password change with old/new/confirm validation
   openMigrationWizard(src)  8381    Device transfer wizard
   r_sources()               8688    Render income sources screen
+  showTagManager()          —       Modal: view/delete custom tags from sn_tag_registry
+  _deleteCustomTag(name)    —       Remove one tag from registry + refresh modal
 
 ════════════════════════════════════════════════════════════════
 
@@ -230,6 +236,8 @@
   act           needs background:rgba(255,255,255,.05) — transparent looks broken on dark
   personality-badge  base CSS conflicted with v5 override — base needs dark bg fallback
   mm-tc         ios Safari composites rgba alpha against white — v5 block must override
+  getDynamicTagList  always calls pruneOldTags first — never call _loadTagRegistry directly for UI
+  migrateTagsToRegistry  checks registry._migrated flag — safe to call on every boot
 
 ════════════════════════════════════════════════════════════════
 
@@ -5630,6 +5638,76 @@
       'Education', 'Festival', 'Vehicle', 'Gift'
     ];
 
+    // ── TAG REGISTRY — dynamic tag persistence ────────────────────────
+    const TAG_REGISTRY_KEY = 'sn_tag_registry';
+    const TAG_PRUNE_DAYS = 90;
+
+    function _loadTagRegistry() {
+      try {
+        const raw = localStorage.getItem(TAG_REGISTRY_KEY);
+        if (!raw) return { tags: [] };
+        return JSON.parse(raw);
+      } catch(e) { return { tags: [] }; }
+    }
+
+    function _saveTagRegistry(registry) {
+      try { localStorage.setItem(TAG_REGISTRY_KEY, JSON.stringify(registry)); } catch(e) {}
+    }
+
+    function recordTagUsage(tagName) {
+      if (!tagName || PRESET_TAGS.includes(tagName)) return; // presets don't need tracking
+      const registry = _loadTagRegistry();
+      const now = Date.now();
+      const existing = registry.tags.find(t => t.name === tagName);
+      if (existing) {
+        existing.lastUsed = now;
+        existing.useCount = (existing.useCount || 1) + 1;
+      } else {
+        registry.tags.push({ name: tagName, lastUsed: now, useCount: 1 });
+      }
+      _saveTagRegistry(registry);
+    }
+
+    function pruneOldTags() {
+      const registry = _loadTagRegistry();
+      const cutoff = Date.now() - TAG_PRUNE_DAYS * 86400000;
+      registry.tags = registry.tags.filter(t => (t.lastUsed || 0) >= cutoff);
+      _saveTagRegistry(registry);
+    }
+
+    function getDynamicTagList() {
+      pruneOldTags();
+      const registry = _loadTagRegistry();
+      // Sort custom tags by recency
+      const customTags = registry.tags
+        .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))
+        .map(t => t.name)
+        .filter(n => !PRESET_TAGS.includes(n));
+      return [...PRESET_TAGS, ...customTags];
+    }
+
+    function migrateTagsToRegistry() {
+      // Run once: scan all transactions and seed registry with existing custom tags
+      const registry = _loadTagRegistry();
+      if (registry._migrated) return;
+      const now = Date.now();
+      const txns = (D && D.transactions) ? D.transactions : [];
+      for (const t of txns) {
+        if (!t.tags) continue;
+        for (const tag of t.tags) {
+          if (PRESET_TAGS.includes(tag)) continue;
+          const existing = registry.tags.find(r => r.name === tag);
+          if (existing) {
+            existing.useCount = (existing.useCount || 1) + 1;
+          } else {
+            registry.tags.push({ name: tag, lastUsed: now, useCount: 1 });
+          }
+        }
+      }
+      registry._migrated = true;
+      _saveTagRegistry(registry);
+    }
+
     const LS = 'sn_v4';
 
     // ── AI CONFIG SYSTEM ──────────────────────────────────────────
@@ -7937,6 +8015,8 @@
           ${row('weeklyDigest','Weekly Digest 📅','Monday morning summary')}
           <div class="ai-cfg-section">LIMITS</div>
           ${row('budgetSuggest','Smart Budget Suggestion','AI-suggested limits from history')}
+          <div class="ai-cfg-section">TAGS</div>
+          <button onclick="APP.showTagManager()" style="width:100%;text-align:left;background:rgba(255,255,255,.05);border:none;border-radius:var(--r);padding:12px 14px;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer;font-family:var(--ff)">🏷 Manage Tags</button>
         `;
       },
 
@@ -8164,10 +8244,13 @@
       renderAddTagChips() {
         const el = document.getElementById('addTagChips');
         if (!el) return;
-        const allChips = [...PRESET_TAGS, ..._addTags.filter(t => !PRESET_TAGS.includes(t))];
+        const allChips = getDynamicTagList().concat(
+          _addTags.filter(t => !getDynamicTagList().includes(t))
+        );
         el.innerHTML = allChips.map(tag => {
           const on = _addTags.includes(tag);
-          return `<div onclick="APP.toggleAddTag('${esc(tag)}')" style="flex-shrink:0;padding:6px 11px;border-radius:16px;border:1.5px solid ${on ? 'var(--teal)' : 'var(--fog)'};background:${on ? 'var(--tealL)' : 'var(--card)'};font-size:11px;font-weight:600;color:${on ? 'var(--tealD)' : 'var(--slate)'};cursor:pointer;white-space:nowrap;transition:all .12s">#${esc(tag)}</div>`;
+          const isCustom = !PRESET_TAGS.includes(tag);
+          return `<div onclick="APP.toggleAddTag('${esc(tag)}')" style="flex-shrink:0;padding:6px 11px;border-radius:16px;border:1.5px solid ${on ? 'var(--teal)' : (isCustom ? 'var(--teal)' : 'var(--fog)')};background:${on ? 'var(--tealL)' : 'var(--card)'};font-size:11px;font-weight:600;color:${on ? 'var(--tealD)' : (isCustom ? 'var(--teal)' : 'var(--slate)')};cursor:pointer;white-space:nowrap;transition:all .12s">#${esc(tag)}</div>`;
         }).join('');
         this._renderSelectedTags();
       },
@@ -8190,6 +8273,7 @@
         if (val.length > 30) { toast('Tag too long — max 30 characters'); return; }
         if (_addTags.includes(val)) { inp.value = ''; return; } // silent dedup (U-009, UI-015)
         _addTags.push(val);
+        recordTagUsage(val); // persist to registry
         inp.value = '';
         this.renderAddTagChips();
       },
@@ -8600,8 +8684,47 @@
       meesho:'comfortable', nykaa:'comfortable', tatacliq:'comfortable',
     };
 
+    // ── HISTORY MERCHANT LOOKUP ───────────────────────────────────────
+    // Returns {bkt, confidence, matchedDesc} or null
+    // confidence: 3=exact, 2=contains, 1=word-overlap
+    function _findHistoryMerchant(desc) {
+      if (!desc || !D || !D.transactions || D.transactions.length === 0) return null;
+      const needle = desc.toLowerCase().trim();
+      if (needle.length < 2) return null;
+
+      let best = null;
+
+      const txns = D.transactions;
+      for (const t of txns) {
+        if (!t.merchant || !t.bucket) continue;
+        const hay = t.merchant.toLowerCase().trim();
+        let confidence = 0;
+
+        if (hay === needle) {
+          confidence = 3; // exact match
+        } else if (hay.includes(needle) || needle.includes(hay)) {
+          confidence = 2; // substring match
+        } else {
+          // word overlap
+          const needleWords = needle.split(/\s+/).filter(w => w.length > 2);
+          const hayWords = hay.split(/\s+/).filter(w => w.length > 2);
+          const overlap = needleWords.filter(w => hayWords.includes(w)).length;
+          if (overlap > 0) confidence = 1;
+        }
+
+        if (confidence > 0) {
+          if (!best || confidence > best.confidence) {
+            best = { bkt: t.bucket, confidence, matchedDesc: t.merchant, tags: t.tags || [] };
+          }
+          if (best.confidence === 3) break; // exact — no need to continue
+        }
+      }
+
+      return best;
+    }
+
     // ── PARSE NLT (natural language text) ────────────────────────────
-    // Returns {amt, desc, bkt, src} or null
+    // Returns {amt, desc, bkt, src, suggestedTags, learnedFromHistory, historyInfo} or null
     function aiParseText(raw) {
       if (!raw || raw.trim().length < 2) return null;
       const text = raw.trim();
@@ -8633,12 +8756,29 @@
       // Title-case first letter
       desc = desc.charAt(0).toUpperCase() + desc.slice(1);
 
-      // 3. Auto-categorize bucket
+      // 3. Auto-categorize bucket — history lookup first
       const lower = text.toLowerCase();
       let bkt = null;
-      // Check merchant map first
-      for (const [merchant, b] of Object.entries(AI_MERCHANT_MAP)) {
-        if (lower.includes(merchant)) { bkt = b; break; }
+      let learnedFromHistory = false;
+      let historyInfo = null;
+      let suggestedTags = [];
+
+      const historyMatch = _findHistoryMerchant(desc);
+      if (historyMatch && historyMatch.confidence >= 2) {
+        bkt = historyMatch.bkt;
+        learnedFromHistory = true;
+        historyInfo = historyMatch;
+        // Suggest tags from history match (dedupe, filter preset)
+        if (historyMatch.tags && historyMatch.tags.length > 0) {
+          suggestedTags = [...new Set(historyMatch.tags)];
+        }
+      }
+
+      // Fall back to merchant map
+      if (!bkt) {
+        for (const [merchant, b] of Object.entries(AI_MERCHANT_MAP)) {
+          if (lower.includes(merchant)) { bkt = b; break; }
+        }
       }
       // Then keyword scoring
       if (!bkt) {
@@ -8654,7 +8794,7 @@
       // 4. Source — use last used, default to upi
       const src = (S && S.addSrc) || (D && D.lastSrc) || 'upi';
 
-      return { amt, desc, bkt, src };
+      return { amt, desc, bkt, src, suggestedTags, learnedFromHistory, historyInfo };
     }
 
     // ── SHOW AI CONFIRMATION CARD ────────────────────────────────────
@@ -8671,7 +8811,16 @@
       const cfSrc = document.getElementById('aiCfSrc');
       if (cfAmt) cfAmt.textContent = '₹' + parsed.amt.toLocaleString('en-IN');
       if (cfDesc) cfDesc.textContent = parsed.desc;
-      if (cfBkt) cfBkt.textContent = (BUCKETS[parsed.bkt] ? BUCKETS[parsed.bkt].g + ' ' + BUCKETS[parsed.bkt].l : parsed.bkt);
+
+      // Show learned badge on bucket chip
+      let bktLabel = BUCKETS[parsed.bkt] ? BUCKETS[parsed.bkt].g + ' ' + BUCKETS[parsed.bkt].l : parsed.bkt;
+      if (parsed.learnedFromHistory) {
+        bktLabel += ' <span style="font-size:10px;font-weight:700;color:var(--teal);background:var(--tealL);padding:2px 6px;border-radius:8px;margin-left:4px">✦ learned</span>';
+        if (cfBkt) cfBkt.innerHTML = bktLabel;
+      } else {
+        if (cfBkt) cfBkt.textContent = bktLabel;
+      }
+
       const srcObj = SRCS.find(s => s.k === parsed.src);
       if (cfSrc) cfSrc.textContent = srcObj ? srcObj.i + ' ' + srcObj.l : parsed.src;
       card.style.display = 'block';
@@ -8691,6 +8840,24 @@
         if (parsed.date) { cfDate.textContent = parsed.date; cfDateRow.style.display = 'flex'; }
         else { cfDateRow.style.display = 'none'; }
       }
+
+      // Auto-apply learned tags from history
+      if (parsed.suggestedTags && parsed.suggestedTags.length > 0) {
+        for (const tag of parsed.suggestedTags) {
+          if (!_addTags.includes(tag)) _addTags.push(tag);
+        }
+        if (APP.renderAddTagChips) APP.renderAddTagChips();
+      }
+
+      // Show history info in status
+      const status = document.getElementById('aiStatus');
+      if (status && parsed.learnedFromHistory && parsed.historyInfo) {
+        const count = (D && D.transactions ? D.transactions.filter(t => t.merchant && t.merchant.toLowerCase() === parsed.desc.toLowerCase()).length : 0);
+        status.textContent = count > 0
+          ? `✦ Learned from your history (${count} record${count>1?'s':''})`
+          : '✦ Learned from your history';
+      }
+
       APP.selBkt(parsed.bkt);
       APP.selSrc(parsed.src);
       // Enable the Save button — OCR-FIX-003: valAdd() was never called after pre-fill
@@ -9642,6 +9809,8 @@
     }
 
     _installAIMethods();
+    // Seed tag registry from existing transaction history (runs once)
+    try { migrateTagsToRegistry(); } catch(e) {}
 
     // Hook r_home to also render AI cards
     const _origRHome = APP.r_home.bind(APP);
@@ -9702,6 +9871,84 @@
           toast(reaction, 3000);
         }, 300);
       }
+      // Record tags to registry
+      if (_addTags && _addTags.length > 0) {
+        for (const tag of _addTags) recordTagUsage(tag);
+      }
+    };
+
+    // Wrap aiSaveConfirmed to record tags after AI save
+    const _origAiSaveConfirmed = APP.aiSaveConfirmed ? APP.aiSaveConfirmed.bind(APP) : null;
+    if (_origAiSaveConfirmed) {
+      APP.aiSaveConfirmed = function() {
+        // Record tags before save clears _addTags
+        const tagsToRecord = [...(_addTags || [])];
+        _origAiSaveConfirmed.call(this);
+        for (const tag of tagsToRecord) recordTagUsage(tag);
+      };
+    }
+
+    // Wrap hToggleTag to record tag registry usage
+    const _origHToggleTag = APP.hToggleTag ? APP.hToggleTag.bind(APP) : null;
+    if (_origHToggleTag) {
+      APP.hToggleTag = function(txnId, tag) {
+        _origHToggleTag.call(this, txnId, tag);
+        recordTagUsage(tag);
+      };
+    }
+
+    // Wrap _refreshTxnTagUI to use dynamic tag list
+    const _origRefreshTxnTagUI = APP._refreshTxnTagUI ? APP._refreshTxnTagUI.bind(APP) : null;
+    if (_origRefreshTxnTagUI) {
+      APP._refreshTxnTagUI = function(txnId) {
+        const chipsEl = document.getElementById(`iet_${txnId}`);
+        if (!chipsEl) return;
+        const t = (D.transactions || []).find(x => x.id === txnId);
+        if (!t) return;
+        const tTags = t.tags || [];
+        const allTags = getDynamicTagList();
+        chipsEl.innerHTML = allTags.map(tag => {
+          const on = tTags.includes(tag);
+          return `<button class="tag-chip${on?' on':''}" onclick="APP.hToggleTag('${txnId}','${esc(tag)}')">` +
+            `#${esc(tag)}</button>`;
+        }).join('');
+      };
+    }
+
+    // ── TAG MANAGER MODAL ─────────────────────────────────────────────
+    APP.showTagManager = function() {
+      const registry = _loadTagRegistry();
+      const customTags = registry.tags
+        .filter(t => !PRESET_TAGS.includes(t.name))
+        .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+
+      const tagRows = customTags.length === 0
+        ? '<p style="color:var(--slate);font-size:14px;text-align:center;padding:20px 0">No custom tags yet.<br>Add tags while logging spends.</p>'
+        : customTags.map(t => {
+            const daysAgo = Math.floor((Date.now() - (t.lastUsed || 0)) / 86400000);
+            const lastUsedStr = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`;
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--fog)">
+              <div>
+                <span style="font-size:13px;font-weight:600;color:var(--ink)">#${esc(t.name)}</span>
+                <span style="font-size:11px;color:var(--slate);margin-left:8px">${t.useCount||1}× · ${lastUsedStr}</span>
+              </div>
+              <button onclick="APP._deleteCustomTag('${esc(t.name)}')"
+                style="background:none;border:none;font-size:16px;cursor:pointer;color:var(--slate);padding:4px 8px">🗑</button>
+            </div>`;
+          }).join('');
+
+      modal('🏷 My Custom Tags',
+        `<div style="margin-bottom:12px;font-size:13px;color:var(--slate)">Custom tags are remembered for ${TAG_PRUNE_DAYS} days after last use.</div>` + tagRows,
+        [{ l: 'Done', c: 'mb-ok', a: () => this.cm() }]
+      );
+    };
+
+    APP._deleteCustomTag = function(tagName) {
+      const registry = _loadTagRegistry();
+      registry.tags = registry.tags.filter(t => t.name !== tagName);
+      _saveTagRegistry(registry);
+      this.cm();
+      setTimeout(() => this.showTagManager(), 50);
     };
 
     // BUG-017: global error handlers
