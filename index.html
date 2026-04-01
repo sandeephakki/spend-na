@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v5.2
+  VERSION:        v5.3
   FILE:           index.html — single-file PWA, no build step
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
@@ -152,7 +152,8 @@
   SRC_DB          6355    load · save  (key: sn_sources)
   SHARD           6390    forMonth · months · manifest · exportMonth · writeCurrentMonthShard
   APP             6505    all UI methods — see section 8
-  _findHistoryMerchant    Before aiParseText    History-first bucket lookup (confidence 1–3)
+  fmtINR          After fmtF    Indian comma format (1,00,000) — use on all display
+  parseINR        After fmtINR  Strip commas + parseFloat — replaces parseFloat(el.value)
   TAG_REGISTRY    After PRESET_TAGS    _loadTagRegistry · _saveTagRegistry · recordTagUsage
                                        pruneOldTags · getDynamicTagList · migrateTagsToRegistry
 
@@ -186,6 +187,7 @@
   r_sources()               8688    Render income sources screen
   showTagManager()          —       Modal: view/delete custom tags from sn_tag_registry
   _deleteCustomTag(name)    —       Remove one tag from registry + refresh modal
+  setHistSort(s)            —       Set S.histSort ('date'|'bucket') + re-render history
 
 ════════════════════════════════════════════════════════════════
 
@@ -238,6 +240,40 @@
   mm-tc         ios Safari composites rgba alpha against white — v5 block must override
   getDynamicTagList  always calls pruneOldTags first — never call _loadTagRegistry directly for UI
   migrateTagsToRegistry  checks registry._migrated flag — safe to call on every boot
+  histSort      S.histSort default 'date' — initialised in r_history() guard; setHistSort() method required
+  histExpanded  S.histExpanded keyed by mon string — current month auto-expanded, others collapsed
+  addSave       sticky bottom button (id=addSave) replaces top-corner; top-corner hidden via pointer-events:none
+  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma-formatted strings
+  parseINR      replaces parseFloat everywhere amt input is read — commas break parseFloat
+  data_sharding enabled true for new users via FLAGS.initNew(); existing users opt-in via Settings toggle
+  histSort      S.histSort default 'date' — init guard in r_history(); never assume present
+  histExpanded  S.histExpanded keyed by month string — current month auto-expanded, rest collapsed
+  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
+  parseINR      replaces parseFloat everywhere amount inputs are read — commas break parseFloat
+  addSave       now inside aiManualForm as sticky bottom btn — top-corner btn is ghost (opacity:0)
+  data_sharding enabled true for new users; toggle in Settings → My Data → STORAGE
+  histSort      S.histSort default 'date' — always init in r_history() guard before use
+  histExpanded  S.histExpanded[mon] — undefined means use default (current month=open, others=closed)
+  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
+  parseINR      replaces all parseFloat(amtEl.value) — commas break parseFloat
+  addSave       id="addSave" now on sticky bottom button — top-corner button hidden (pointer-events:none)
+  sharding      D.transactions in memory = full history; sn_v4 written trimmed only when flag active
+  histSort      S.histSort default 'date' — always guard with if(!S.histSort) in r_history()
+  histExpanded  S.histExpanded[mon] — current month defaults true, all others default false
+  addSave       id="addSave" now on sticky bottom button only — top header button is hidden
+  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
+  parseINR      use everywhere parseFloat(amtEl.value) was used — commas break parseFloat
+  sharding      D.transactions in memory = full history; sn_v4 written = current month only when flag on
+  histSort      S.histSort default 'date' — always init in r_history() guard
+  histExpanded  S.histExpanded keyed by month string — current month auto-expanded, others collapsed
+  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
+  parseINR      replaces all parseFloat(amtEl.value) calls — commas break parseFloat
+  addSave       now a full-width sticky bottom button inside aiManualForm — top-corner btn hidden
+  fmtINR        type="text" inputmode="decimal" required on amt inputs — type="number" rejects commas
+  parseINR      replaces all parseFloat(amtEl.value) — commas break parseFloat silently
+  histSort      S.histSort defaults 'date' — guard with if(!S.histSort) on every r_history entry
+  histExpanded  S.histExpanded[mon] — current month auto-expanded, others collapsed by default
+  data_sharding enabled true for new users in FLAGS.initNew — existing users opt-in via Settings
 
 ════════════════════════════════════════════════════════════════
 
@@ -5353,8 +5389,7 @@
           <div class="shdr">
             <button class="shdr-back" onclick="APP.go('home')">← Back</button>
             <div class="shdr-title">Add Spend</div>
-            <button class="shdr-action" id="addSave" onclick="APP.saveManual()" style="opacity:.3"
-              disabled>Save</button>
+            <button class="shdr-action" style="opacity:0;pointer-events:none" disabled>Save</button>
           </div>
           <div class="scr-body">
 
@@ -5408,8 +5443,10 @@
             <div id="aiManualForm" style="display:none">
             <div class="amt-hero">
               <span class="amt-sym">₹</span>
-              <input class="amt-in" id="addAmt" type="number" inputmode="decimal" placeholder="0" min="1" max="9999999"
-                oninput="APP.valAdd()">
+              <input class="amt-in" id="addAmt" type="text" inputmode="decimal" placeholder="0"
+                oninput="APP.valAdd()"
+                onfocus="this.value=parseINR(this.value)||''"
+                onblur="if(this.value)this.value=fmtINR(parseINR(this.value))">
             </div>
             <div class="add-sec" style="margin-bottom:0">
               <span class="add-lbl">DATE</span>
@@ -5424,14 +5461,14 @@
                 placeholder="e.g. Lunch, Petrol, School fees" maxlength="100">
             </div>
             <div class="add-sec" style="margin-top:18px">
-              <span class="add-lbl">HOW DID YOU PAY?</span>
-              <div class="srcs" id="srcGrid"></div>
-            </div>
-            <div class="add-sec" style="margin-top:18px">
               <span class="add-lbl">WHICH BUCKET?</span>
               <div class="bkts" id="bktGrid"></div>
             </div>
-            <div style="padding:0 16px;margin-top:14px;padding-bottom:40px">
+            <div class="add-sec" style="margin-top:18px">
+              <span class="add-lbl">HOW DID YOU PAY?</span>
+              <div class="srcs" id="srcGrid"></div>
+            </div>
+            <div style="padding:0 16px;margin-top:14px">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
                 <span class="add-lbl">TAGS <span
                     style="font-size:9px;color:var(--mist);font-weight:500;letter-spacing:0;text-transform:none">optional</span></span>
@@ -5450,6 +5487,13 @@
                 </div>
               </div>
               <div id="addTagSelected" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>
+            </div>
+            <!-- IMP-2: sticky thumb-reachable Save button -->
+            <div style="padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));margin-top:8px">
+              <button id="addSave" onclick="APP.saveManual()" disabled
+                style="width:100%;padding:16px;font-size:17px;font-weight:700;background:var(--teal);color:#fff;border:none;border-radius:var(--r);cursor:pointer;opacity:.3;font-family:var(--ff);transition:opacity .15s">
+                Save Spend
+              </button>
             </div>
             </div><!-- end aiManualForm -->
           </div>
@@ -5850,7 +5894,7 @@
         get(k)      { const s = _r(); return typeof s[k] !== 'undefined' ? s[k] : (FLAG_DEFAULTS[k] ?? false); },
         set(k, v)   { const s = _r(); s[k] = v; _w(s); },
         all()       { const s = _r(); const m = {}; Object.keys(FLAG_DEFAULTS).forEach(k => m[k] = typeof s[k] !== 'undefined' ? s[k] : FLAG_DEFAULTS[k]); return m; },
-        initNew()   { _w({ ...FLAG_DEFAULTS, beta_ui: true }); },
+        initNew()   { _w({ ...FLAG_DEFAULTS, beta_ui: true, data_sharding: true }); },
         initExist() { const s = _r(); _w({ ...FLAG_DEFAULTS, ...s }); },
       };
     })();
@@ -6062,6 +6106,8 @@
     function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;'); }
     function fmt(n) { if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`; if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`; return `₹${n}`; }
     function fmtF(n) { return '₹' + (isFinite(+n) ? +n : 0).toLocaleString('en-IN'); }
+    function fmtINR(n) { if (!n && n !== 0) return ''; return Number(n).toLocaleString('en-IN'); }
+    function parseINR(s) { return parseFloat((String(s || '')).replace(/,/g, '')) || 0; }
     function avHTML(p, sz) {
       const s = sz || 44, lt = ((p && p.name && p.name[0]) || 'S').toUpperCase();
       if (p?.photo && String(p.photo).startsWith('data:image/')) return `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
@@ -7542,9 +7588,12 @@
       r_history() {
         const all = D.transactions || [];
         document.getElementById('histCnt').textContent = `${all.length} transaction${all.length !== 1 ? 's' : ''}`;
+        // IMP-1: init sort + expand state
+        if (!S.histSort) S.histSort = 'date';
+        if (!S.histExpanded) S.histExpanded = {};
+
         const fbar = document.getElementById('fBar');
         if (!fbar.hasChildNodes()) {
-          // Step 9: collect all unique tags used across all transactions
           const allUsedTags = [...new Set((D.transactions || []).flatMap(t => t.tags || []))].sort();
           const pills = [
             { k: null, l: 'All' },
@@ -7558,38 +7607,46 @@
             return `<button class="fp${on ? ' on' : ''}${isTag ? ' tag-fp' : ''}" style="${on ? (cfg ? `border-color:${cfg.c};background:${cfg.c}` : isTag ? `border-color:var(--teal);background:var(--teal)` : `border-color:var(--teal);background:var(--teal)`) : ''}" data-filterkey="${esc(p.k || '')}">${esc(p.l)}</button>`;
           }).join('');
         }
+
         const q = (document.getElementById('srchIn')?.value || '').toLowerCase();
         const _searchTerms = expandSearchQuery(q);
         const filt = all.filter(t => {
           const ms = !q || _searchTerms.some(term => (t.merchant||'').toLowerCase().includes(term) || String(t.amount).includes(term));
-          // Step 9: tag filter coexists with bucket/unsorted filters
           const mb = S.histF == null ? true
             : S.histF.startsWith('tag:') ? (t.tags || []).includes(S.histF.slice(4))
                 : t.bucket === S.histF;
           return ms && mb;
         });
+
         const grp = {}; filt.forEach(t => { const k = t.month || 'Unknown'; if (!grp[k]) grp[k] = []; grp[k].push(t); });
         const listEl = document.getElementById('histList');
+
+        // IMP-1: sort bar HTML
+        const sortBar = `<div style="display:flex;gap:8px;padding:0 0 12px">
+          <button onclick="APP.setHistSort('date')" style="padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;border:1.5px solid ${S.histSort==='date'?'var(--teal)':'var(--fog)'};background:${S.histSort==='date'?'var(--tealL)':'var(--card)'};color:${S.histSort==='date'?'var(--tealD)':'var(--slate)'};cursor:pointer;font-family:var(--ff)">Date \u2193</button>
+          <button onclick="APP.setHistSort('bucket')" style="padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;border:1.5px solid ${S.histSort==='bucket'?'var(--teal)':'var(--fog)'};background:${S.histSort==='bucket'?'var(--tealL)':'var(--card)'};color:${S.histSort==='bucket'?'var(--tealD)':'var(--slate)'};cursor:pointer;font-family:var(--ff)">Bucket</button>
+        </div>`;
+
         if (filt.length === 0) {
           const isEmpty = all.length === 0;
-          listEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;text-align:center"><div style="font-size:52px;margin-bottom:16px">${isEmpty ? '\u{1F4B8}' : '\u{1F50D}'}</div><div style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">${isEmpty ? 'No transactions yet' : 'Nothing found'}</div><div style="font-size:14px;color:var(--slate);line-height:1.6">${isEmpty ? 'Add your first spend<br>to start tracking your money.' : 'Try a different search<br>or filter.'}</div>${isEmpty ? `<button onclick="APP.go('add')" style="margin-top:24px;background:var(--teal);border:none;border-radius:var(--r);padding:12px 24px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add a spend ›</button>` : ''}</div>`;
+          listEl.innerHTML = sortBar + `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;text-align:center"><div style="font-size:52px;margin-bottom:16px">${isEmpty ? '\u{1F4B8}' : '\u{1F50D}'}</div><div style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">${isEmpty ? 'No transactions yet' : 'Nothing found'}</div><div style="font-size:14px;color:var(--slate);line-height:1.6">${isEmpty ? 'Add your first spend<br>to start tracking your money.' : 'Try a different search<br>or filter.'}</div>${isEmpty ? `<button onclick="APP.go('add')" style="margin-top:24px;background:var(--teal);border:none;border-radius:var(--r);padding:12px 24px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add a spend \u203a</button>` : ''}</div>`;
           return;
         }
-        listEl.innerHTML = Object.entries(grp).map(([mon, items]) => {
-          const grpTotal = items.reduce((s,t)=>s+t.amount,0);
-          return `<div>
-          <div class="mgrp-hdr"><div class="mgrp-nm">${esc(mon)}</div><div class="mgrp-tot">${fmtF(grpTotal)}</div></div>
-          ${items.map(t => {
-            const cfg = t.bucket ? BUCKETS[t.bucket] : null;
-            const tTags = t.tags || [];
-            return `<div class="htxn-wrap" data-txid="${t.id}">
+
+        const BUCKET_ORDER = ['necessary','committed','comfortable','luxury'];
+        const nowMonKey = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+
+        const txnCard = (t) => {
+          const cfg = t.bucket ? BUCKETS[t.bucket] : null;
+          const tTags = t.tags || [];
+          return `<div class="htxn-wrap" data-txid="${t.id}">
               <div class="htxn" id="ht_${t.id}" data-bucket="${esc(t.bucket||'')}">
                 <div class="htxn-row">
                   <div class="htxn-ic">${ico(t.merchant)}</div>
                   <div class="htxn-info">
                     <div class="htxn-nm">${esc(t.merchant)}</div>
                     <div class="htxn-meta">
-                      <span class="htxn-dt">${t.date} · ${t.time}</span>
+                      <span class="htxn-dt">${t.date} \u00b7 ${t.time}</span>
                       ${cfg ? `<span class="htxn-bkt htxn-bkt-${t.bucket}">${cfg.l}</span>` : ''}
                     </div>
                     ${tTags.length>0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">${tTags.map(tag=>`<span class="tag-pill">#${esc(tag)}</span>`).join('')}</div>` : ''}
@@ -7609,16 +7666,14 @@
                 <div class="ie-box" id="ie_${t.id}" style="display:none">
                   <label class="ie-lbl" style="display:block;margin-bottom:4px">DATE</label>
                   <div style="display:flex;gap:8px;margin-bottom:10px">
-                    <input class="s-in" style="font-size:13px;padding:8px 10px;flex:1" type="text"
-                      id="ie-date-${t.id}" value="${esc(t.date||'')}" maxlength="20"
-                      placeholder="e.g. 23 Mar" inputmode="text">
+                    <input class="s-in" style="font-size:13px;padding:8px 10px;flex:1" type="text" id="ie-date-${t.id}" value="${esc(t.date||'')}" maxlength="20" placeholder="e.g. 23 Mar" inputmode="text">
                     <button onclick="APP.hSaveDate('${t.id}')" style="background:var(--teal);color:#fff;border:none;border-radius:var(--r);padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:var(--ff)">Save Date</button>
                   </div>
                   <label class="ie-lbl" style="display:block;margin-bottom:4px">DESCRIPTION</label>
                   <input class="s-in" style="font-size:13px;padding:8px 10px;margin-bottom:10px" type="text" id="ie-desc-${t.id}" value="${esc(t.merchant||'')}" maxlength="60" placeholder="e.g. Swiggy, Coffee">
                   <button onclick="APP.hSaveDesc('${t.id}')" style="margin-bottom:12px;width:100%;background:var(--teal);color:#fff;border:none;border-radius:var(--r);padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--ff)">Save Description \u2713</button>
                   <span class="ie-lbl">CHANGE BUCKET</span>
-                  <div class="ie-row">${Object.entries(BUCKETS).map(([bk,bc])=>{const on=t.bucket===bk;return `<button class="ie-btn" style="${on?`border-color:${bc.c};background:${bc.cl}`:''}" onclick="APP.hClassify('${t.id}','${bk}')"><div class="ie-ic" style="background:${bc.cl};color:${bc.c};border-color:${bc.cm}">${bc.g}</div><span class="ie-lb2" style="${on?`color:${bc.c};font-weight:800`:''}">${bc.l}</span></button>`;}).join('')}</div>
+                  <div class="ie-row">${Object.entries(BUCKETS).map(([bk,bc])=>{const on=t.bucket===bk;return `<button class="ie-btn" style="${on?`border-color:${bc.c};background:${bc.cl}`:''}" onclick="APP.hClassify('${t.id}','${bk}')"><div class="ie-ic" style="background:${bc.cl};color:${bc.c};border-color:${bc.cm}">${bc.g}</div><span class="ie-lb2" style="${on?`color:${bc.c};font-weight:800`:''}"> ${bc.l}</span></button>`;}).join('')}</div>
                   <span class="ie-lbl" style="margin-top:12px;display:block">TAGS</span>
                   <div class="tag-chips" id="iet_${t.id}">${PRESET_TAGS.map(tag=>{const on=tTags.includes(tag);return `<button class="tag-chip${on?' on':''}" onclick="APP.hToggleTag('${t.id}','${esc(tag)}')">#${esc(tag)}</button>`;}).join('')}</div>
                   <div class="tag-chip-custom" style="margin-top:8px">
@@ -7635,14 +7690,37 @@
                 <button class="hact-del" onclick="APP.hSwipeDel('${t.id}')"><span>\U0001f5d1\ufe0f</span>Delete</button>
               </div>
             </div>`;
-          }).join('')}
-        </div></div>`;
+        };
+
+        listEl.innerHTML = sortBar + Object.entries(grp).map(([mon, items]) => {
+          const grpTotal = items.reduce((s,t)=>s+t.amount,0);
+          const safeKey = mon.replace(/\s+/g,'-');
+          const isCurrentMonth = mon === nowMonKey;
+          const expanded = S.histExpanded[mon] !== undefined ? S.histExpanded[mon] : isCurrentMonth;
+          const arrow = expanded ? '\u25be' : '\u25b8';
+          let displayItems = [...items];
+          if (S.histSort === 'bucket') {
+            displayItems.sort((a,b) => {
+              const ai = BUCKET_ORDER.indexOf(a.bucket||''), bi = BUCKET_ORDER.indexOf(b.bucket||'');
+              return (ai===-1?99:ai)-(bi===-1?99:bi);
+            });
+          }
+          return `<div>
+            <div class="mgrp-hdr" onclick="APP.toggleMonthGroup('${esc(mon)}')" style="cursor:pointer;user-select:none">
+              <div class="mgrp-nm"><span id="mgrp-arrow-${safeKey}" style="margin-right:6px;font-size:12px">${arrow}</span>${esc(mon)}</div>
+              <div class="mgrp-tot">${fmtF(grpTotal)}</div>
+            </div>
+            <div id="mgrp-body-${safeKey}" style="display:${expanded?'':'none'}">
+              ${displayItems.map(txnCard).join('')}
+            </div>
+          </div>`;
         }).join('');
-        // BUG-7: re-attach filter pill click listeners after render
+
+        // BUG-7: re-attach filter pill listeners
         document.getElementById('fBar').querySelectorAll('.fp').forEach(function(btn) {
           btn.addEventListener('click', function() { APP.setHF(btn.dataset.filterkey); });
         });
-        // FIX-6C: init swipe gestures after render
+        // FIX-6C: swipe gestures
         (function initSwipeActions(container) {
           var startX=0,startY=0,activeWrap=null;
           container.addEventListener('touchstart',function(e){startX=e.touches[0].clientX;startY=e.touches[0].clientY;activeWrap=e.target.closest('.htxn-wrap');},{passive:true});
@@ -7657,26 +7735,15 @@
         })(listEl);
       },
       toggleMonthGroup(mon) {
-        if (!S.collapsedMonths) S.collapsedMonths = new Set();
-        const key = mon;
-        if (S.collapsedMonths.has(key)) S.collapsedMonths.delete(key);
-        else S.collapsedMonths.add(key);
-        // Toggle visibility without full re-render
-        const safeKey = key.replace(/\s+/g, '-');
+        if (!S.histExpanded) S.histExpanded = {};
+        S.histExpanded[mon] = !( S.histExpanded[mon] !== undefined ? S.histExpanded[mon] : (mon === new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'})) );
+        const safeKey = mon.replace(/\s+/g,'-');
         const body = document.getElementById('mgrp-body-' + safeKey);
         const arrow = document.getElementById('mgrp-arrow-' + safeKey);
-        if (body) body.style.display = S.collapsedMonths.has(key) ? 'none' : '';
-        if (arrow) arrow.textContent = S.collapsedMonths.has(key) ? '▶' : '▼';
+        if (body) body.style.display = S.histExpanded[mon] ? '' : 'none';
+        if (arrow) arrow.textContent = S.histExpanded[mon] ? '\u25be' : '\u25b8';
       },
-      setHF(k) {
-        const resolved = (k === 'null' || !k) ? null : k;
-        S.histF = (resolved !== null && resolved === S.histF) ? null : resolved;
-        // Show hint when any filter is active (BUG-06)
-        const noteEl = document.getElementById('filterNote');
-        if (noteEl) noteEl.style.display = S.histF ? 'block' : 'none';
-        document.getElementById('fBar').innerHTML = ''; // cleared; r_history re-renders + re-attaches
-        this.r_history();
-      },
+      setHistSort(s) { S.histSort = s; this.r_history(); },
       tgEdit(id) { const el = document.getElementById('ie_' + id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
       hClassify(id, bkt) { D.transactions = D.transactions.map(t => t.id === id ? { ...t, bucket: bkt } : t); DB.save(D); this.markUnsaved(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast(`→ ${BUCKETS[bkt].l}`); },
       hSaveDesc(id) {
@@ -7788,7 +7855,7 @@
       },
       valAdd() {
         const amtEl = document.getElementById('addAmt');
-        const amt = parseFloat(amtEl?.value || '0');
+        const amt = parseINR(amtEl?.value || '0');
         const desc = (document.getElementById('addDesc')?.value || '').trim();
         const ok = amt > 0 && amt <= 9999999 && S.addSrc && S.addBkt;
         const btn = document.getElementById('addSave'); if (btn) { btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.3'; }
@@ -7800,7 +7867,7 @@
       saveManual() {
         if (S.saveBusy) return; // BUG-006: prevent double-save
         const amtEl = document.getElementById('addAmt');
-        const amt = parseFloat(amtEl?.value || '0');
+        const amt = parseINR(amtEl?.value || '0');
         const desc = (document.getElementById('addDesc')?.value || '').trim();
         if (!amt || amt <= 0) { toast('Please enter an amount'); return; }
         if (amt > 9999999) { toast('Amount too large'); return; }
@@ -7834,12 +7901,12 @@
           ${isOver ? `<span class="lc-st" style="color:var(--err)">OVER</span>` : ''}
           ${isNear ? `<span class="lc-st" style="color:var(--warn)">NEAR</span>` : ''}
         </div>
-        <div class="lc-row"><span class="lc-sym">₹</span><input class="lc-in" id="lv_${k}" type="number" inputmode="numeric" value="${lim}" style="color:${col};border-color:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : 'var(--fog)'}" min="0" oninput="S.limVals['${k}']=Math.max(0,parseFloat(this.value)||0)"></div>
+        <div class="lc-row"><span class="lc-sym">₹</span><input class="lc-in" id="lv_${k}" type="text" inputmode="decimal" value="${lim > 0 ? fmtINR(lim) : ''}" placeholder="0" style="color:${col};border-color:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : 'var(--fog)'}" oninput="S.limVals['${k}']=Math.max(0,parseINR(this.value)||0)" onfocus="this.value=parseINR(this.value)||''" onblur="if(this.value)this.value=fmtINR(parseINR(this.value))"></div>
         ${lim > 0 ? `<div class="lc-bar" style="background:${c.cl}"><div class="lc-bfill" style="background:${col};width:${pct}%"></div></div><div class="lc-bt">₹${amt.toLocaleString('en-IN')} of ₹${lim.toLocaleString('en-IN')} (${Math.round(pct)}%)</div>` : `<div style="font-size:11px;color:var(--mist);margin-top:6px">Type your monthly budget above and tap Save ›</div>`}
       </div>`;
         }).join('') + `<button onclick="APP.resetLimits()" style="width:100%;background:var(--paper);border:1.5px solid var(--fog);border-radius:var(--r);padding:14px;font-size:13px;color:var(--slate);font-weight:600;cursor:pointer;margin-top:4px">Reset to defaults</button>`;
       },
-      setLimQuick(k, v) { S.limVals[k] = v; const el = document.getElementById('lv_' + k); if (el) el.value = v; this.r_limits(); },
+      setLimQuick(k, v) { S.limVals[k] = v; const el = document.getElementById('lv_' + k); if (el) el.value = fmtINR(v); this.r_limits(); },
       saveLimits() { Object.keys(S.limVals).forEach(k => { if (S.limVals[k] < 0) S.limVals[k] = 0; }); D.limits = { ...S.limVals }; DB.save(D); toast('Limits saved ✓'); this.go('home'); },
       resetLimits() { modal('Reset to defaults?', 'Restore original limits?', [{ l: 'Cancel', c: 'mb-nil', a: () => this.cm() }, { l: 'Reset', c: 'mb-sec', a: () => { S.limVals = { ...(ROLES[D.profile.role || 'working'].lim) }; this.cm(); this.r_limits(); } }]); },
 
@@ -7896,6 +7963,8 @@
           <div class="act" onclick="APP.showAnnualWrap()" style="cursor:pointer"><div class="act-ic">🎉</div><div class="act-inf"><div class="act-t">See Annual Wrap 🎉</div><div class="act-s">Your year in rupees — beautiful summary</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.openMigrationWizard('settings')" style="cursor:pointer"><div class="act-ic">📱</div><div class="act-inf"><div class="act-t">Transfer to new device</div><div class="act-s">Move your data to another phone</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.shareBlank()" style="cursor:pointer"><div class="act-ic">🎁</div><div class="act-inf"><div class="act-t">Share app with a friend</div><div class="act-s">Send a blank copy — no personal data</div></div><div class="act-ar">›</div></div>
+          <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:2px;margin:14px 0 8px">STORAGE</div>
+          <div class="tgl-row"><div class="tgl-inf"><div class="tgl-lbl">Monthly file sharding</div><div class="tgl-sub">Keeps main file lean — past months saved separately</div></div><button class="tgl${FLAGS.get('data_sharding') ? ' on' : ''}" id="tgl-shard" onclick="FLAGS.set('data_sharding',!FLAGS.get('data_sharding'));this.classList.toggle('on');toast(FLAGS.get('data_sharding')?'Sharding on — months saved separately':'Sharding off')"><div class="tgl-k"></div></button></div>
           <div style="border-top:1px solid var(--fog);margin:12px 0 8px"></div>
           <div class="act" onclick="APP.clearAllFresh()" style="cursor:pointer"><div class="act-ic" style="color:var(--err)">🗑️</div><div class="act-inf"><div class="act-t" style="color:var(--err)">Clear all data</div><div class="act-s">Delete everything and start fresh</div></div><div class="act-ar">›</div></div>
         </div>
@@ -9859,7 +9928,7 @@
     APP.saveManual = function() {
       if (S.saveBusy) return; // BUG-006: prevent double-save in AI hook
       const amtEl = document.getElementById('addAmt');
-      const amt = parseFloat((amtEl && amtEl.value) || '0');
+      const amt = parseINR((amtEl && amtEl.value) || '0');
       const desc = (document.getElementById('addDesc') && document.getElementById('addDesc').value || '').trim();
       const bkt = S.addBkt;
       // Call original save
