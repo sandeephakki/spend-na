@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v5.3
+  VERSION:        v5.4
   FILE:           index.html — single-file PWA, no build step
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
@@ -96,6 +96,7 @@
   sn_beta_prompted      null (session)       Beta banner shown (sessionStorage)
   sn_lock_until         null (session)       Lockout expiry (sessionStorage)
   sn_tag_registry       {tags:[]}            Dynamic custom tag list with useCount + lastUsed
+  sn_monthend_warned    {}                   Month-end warning dismissed flag {month, dismissed}
   sn_shard_YYYY_Mon     null                 Monthly tx shard — phase 2 only
 
 ════════════════════════════════════════════════════════════════
@@ -188,6 +189,9 @@
   showTagManager()          —       Modal: view/delete custom tags from sn_tag_registry
   _deleteCustomTag(name)    —       Remove one tag from registry + refresh modal
   setHistSort(s)            —       Set S.histSort ('date'|'bucket') + re-render history
+  aiRenderPayday()          —       Home card: income left + daily budget (needs SRC_DB)
+  aiRenderGuiltFree()       —       Home card: consecutive zero-spend day streak
+  aiRenderMonthEnd()        —       Home card: near/over limit warning after day 22
 
 ════════════════════════════════════════════════════════════════
 
@@ -212,6 +216,7 @@
     insight · forecast · streak · voice · reactions · mood
     duplicate · whyBuyThis · smartSearch · story · mirror
     spendTwin · weeklyDigest · budgetSuggest
+    paydayMode · guiltFree · monthEndWarn
 
 ════════════════════════════════════════════════════════════════
 
@@ -240,40 +245,26 @@
   mm-tc         ios Safari composites rgba alpha against white — v5 block must override
   getDynamicTagList  always calls pruneOldTags first — never call _loadTagRegistry directly for UI
   migrateTagsToRegistry  checks registry._migrated flag — safe to call on every boot
-  histSort      S.histSort default 'date' — initialised in r_history() guard; setHistSort() method required
-  histExpanded  S.histExpanded keyed by mon string — current month auto-expanded, others collapsed
-  addSave       sticky bottom button (id=addSave) replaces top-corner; top-corner hidden via pointer-events:none
-  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma-formatted strings
-  parseINR      replaces parseFloat everywhere amt input is read — commas break parseFloat
-  data_sharding enabled true for new users via FLAGS.initNew(); existing users opt-in via Settings toggle
-  histSort      S.histSort default 'date' — init guard in r_history(); never assume present
-  histExpanded  S.histExpanded keyed by month string — current month auto-expanded, rest collapsed
-  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
-  parseINR      replaces parseFloat everywhere amount inputs are read — commas break parseFloat
-  addSave       now inside aiManualForm as sticky bottom btn — top-corner btn is ghost (opacity:0)
-  data_sharding enabled true for new users; toggle in Settings → My Data → STORAGE
-  histSort      S.histSort default 'date' — always init in r_history() guard before use
-  histExpanded  S.histExpanded[mon] — undefined means use default (current month=open, others=closed)
-  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
-  parseINR      replaces all parseFloat(amtEl.value) — commas break parseFloat
-  addSave       id="addSave" now on sticky bottom button — top-corner button hidden (pointer-events:none)
-  sharding      D.transactions in memory = full history; sn_v4 written trimmed only when flag active
-  histSort      S.histSort default 'date' — always guard with if(!S.histSort) in r_history()
-  histExpanded  S.histExpanded[mon] — current month defaults true, all others default false
-  addSave       id="addSave" now on sticky bottom button only — top header button is hidden
-  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
-  parseINR      use everywhere parseFloat(amtEl.value) was used — commas break parseFloat
-  sharding      D.transactions in memory = full history; sn_v4 written = current month only when flag on
-  histSort      S.histSort default 'date' — always init in r_history() guard
-  histExpanded  S.histExpanded keyed by month string — current month auto-expanded, others collapsed
-  fmtINR        type="text" inputmode="decimal" required — type="number" rejects comma strings
-  parseINR      replaces all parseFloat(amtEl.value) calls — commas break parseFloat
-  addSave       now a full-width sticky bottom button inside aiManualForm — top-corner btn hidden
-  fmtINR        type="text" inputmode="decimal" required on amt inputs — type="number" rejects commas
+  histSort      S.histSort default 'date' — guard with if(!S.histSort) in r_history(); setHistSort() method required
+  histExpanded  S.histExpanded[mon] — current month auto-expanded, others collapsed; undefined = use default
+  addSave       id="addSave" sticky bottom button inside aiManualForm — top-corner btn is hidden (pointer-events:none)
+  fmtINR        type="text" inputmode="decimal" required on amt inputs — type="number" rejects comma strings
   parseINR      replaces all parseFloat(amtEl.value) — commas break parseFloat silently
-  histSort      S.histSort defaults 'date' — guard with if(!S.histSort) on every r_history entry
-  histExpanded  S.histExpanded[mon] — current month auto-expanded, others collapsed by default
-  data_sharding enabled true for new users in FLAGS.initNew — existing users opt-in via Settings
+  data_sharding enabled true for new users via FLAGS.initNew(); existing users opt-in via Settings → My Data
+  sharding      D.transactions in memory = full history; sn_v4 written = current month only when flag active
+  _getPaydayInfo    requires SRC_DB income entries for current month — returns null if no income logged
+  _getGuiltFreeStreak  walks back from yesterday (not today) — today is still in progress
+  _merchantFreqAlert   runs as Pattern 0 in aiReaction — takes priority over all other reactions
+  _getLastAmount    scans D.transactions in order — first match = most recent (array is newest-first)
+  monthEndWarn      sn_monthend_warned resets each month (keyed by month string); only fires after day 22
+  hashPw        single canonical fn for all password hashing — never call md5() directly
+  _safeGet      use for all localStorage reads — never JSON.parse(localStorage.getItem) raw
+  normTxn       call on every txn before render — never assume field presence
+  debouncedSave tag/bucket changes only — transaction creates use DB.save directly
+  _txnUpdate    canonical txn patch — never mutate D.transactions.map inline
+  _txnDelete    canonical txn remove — never mutate D.transactions.filter inline
+  _commitSave   use instead of DB.save(D)+markUnsaved()+toast() combos
+  _merchantIndex invalidate after every _commitSave that adds/edits transactions
 
 ════════════════════════════════════════════════════════════════
 
@@ -336,7 +327,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' cdn.jsdelivr.net cdnjs.cloudflare.com; worker-src blob: cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'none'; style-src 'self' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' cdnjs.cloudflare.com; worker-src blob: cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'none'; style-src 'self' 'unsafe-inline';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -5063,38 +5054,38 @@
         <div id="trustAccordion" style="margin: 0 0 16px">
           <div onclick="APP.toggleTrustAccordion()"
             style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:rgba(255,255,255,.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;cursor:pointer;border:1px solid rgba(255,255,255,.14)">
-            <span style="font-size:13px;font-weight:700;color:rgba(255,255,255,.92)">How does this work? ›</span>
+            <span class="txt-label-w">How does this work? ›</span>
             <span id="trustToggleIcon" style="font-size:12px;color:#0ea5e9;font-weight:700">expand</span>
           </div>
           <div id="trustDetails"
             style="display:none;margin-top:8px;flex-direction:column;gap:0;background:rgba(255,255,255,.06);border-radius:12px;border:1px solid rgba(255,255,255,.12);overflow:hidden">
-            <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <div class="row-divider">
               <div
                 style="width:32px;height:32px;border-radius:9px;background:rgba(52,211,153,.18);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">
                 🔒</div>
               <div>
-                <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.92)">Stored only on your device</div>
-                <div style="font-size:11px;color:rgba(255,255,255,.50);margin-top:1px">No account, no cloud, no email. Just your
+                <div class="txt-label-w">Stored only on your device</div>
+                <div class="txt-sub-w">No account, no cloud, no email. Just your
                   phone.</div>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <div class="row-divider">
               <div
                 style="width:32px;height:32px;border-radius:9px;background:rgba(56,189,248,.18);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">
                 📡</div>
               <div>
-                <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.92)">Works fully offline</div>
-                <div style="font-size:11px;color:rgba(255,255,255,.50);margin-top:1px">No internet = no data risk. Works on a flight.
+                <div class="txt-label-w">Works fully offline</div>
+                <div class="txt-sub-w">No internet = no data risk. Works on a flight.
                 </div>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <div class="row-divider">
               <div
                 style="width:32px;height:32px;border-radius:9px;background:rgba(251,191,36,.18);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">
                 👁</div>
               <div>
-                <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.92)">Nobody can read your data</div>
-                <div style="font-size:11px;color:rgba(255,255,255,.50);margin-top:1px">We have no server. Not even the app owner can
+                <div class="txt-label-w">Nobody can read your data</div>
+                <div class="txt-sub-w">We have no server. Not even the app owner can
                   see it.</div>
               </div>
             </div>
@@ -5103,8 +5094,8 @@
                 style="width:32px;height:32px;border-radius:9px;background:rgba(129,140,248,.18);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">
                 🗂</div>
               <div>
-                <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.92)">You control the backup</div>
-                <div style="font-size:11px;color:rgba(255,255,255,.50);margin-top:1px">Save as JSON to your phone or Google Drive
+                <div class="txt-label-w">You control the backup</div>
+                <div class="txt-sub-w">Save as JSON to your phone or Google Drive
                   anytime.</div>
               </div>
             </div>
@@ -5319,6 +5310,23 @@
               <div class="ai-forecast-eyebrow">📈 MONTH FORECAST</div>
               <div class="ai-forecast-text" id="aiForecastText"></div>
               <div class="ai-forecast-bar"><div class="ai-forecast-fill" id="aiForecastFill" style="width:0%"></div></div>
+            </div>
+            <!-- IMP-1: Payday Mode card -->
+            <div id="aiPaydayCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:var(--tealL);border:1.5px solid var(--tealM)">
+              <div style="font-size:10px;font-weight:700;color:var(--tealD);letter-spacing:1.5px;margin-bottom:6px">💰 PAYDAY MODE</div>
+              <div id="aiPaydayText" style="font-size:14px;font-weight:700;color:var(--tealD)"></div>
+              <div id="aiPaydaySub" style="font-size:12px;color:var(--teal);margin-top:3px"></div>
+            </div>
+            <!-- IMP-2: Guilt-Free Day card -->
+            <div id="aiGuiltFreeCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:#f0fdf4;border:1.5px solid #bbf7d0">
+              <div style="font-size:10px;font-weight:700;color:#15803d;letter-spacing:1.5px;margin-bottom:4px">🌿 GUILT-FREE STREAK</div>
+              <div id="aiGuiltFreeText" style="font-size:14px;font-weight:700;color:#15803d"></div>
+            </div>
+            <!-- IMP-5: Month-End Warning card -->
+            <div id="aiMonthEndCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:#fff7ed;border:1.5px solid #fed7aa">
+              <div style="font-size:10px;font-weight:700;color:#c2410c;letter-spacing:1.5px;margin-bottom:6px">⚠️ MONTH-END CHECK</div>
+              <div id="aiMonthEndText" style="font-size:13px;color:#9a3412;line-height:1.6"></div>
+              <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}" style="margin-top:8px;font-size:11px;font-weight:700;color:#c2410c;background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
             </div>
             <div class="h-hero" id="hHero"></div>
             <div class="h-body fade-up" id="hBody"></div>
@@ -5609,9 +5617,9 @@
   <div id="toast"></div>
   <div id="moodPrompt" role="status" aria-live="polite" style="display:none;position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 88px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--fog);border-radius:40px;padding:8px 16px;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:801;white-space:nowrap">
     <span style="font-size:12px;color:var(--slate);font-weight:600">How did that feel?</span>
-    <button onclick="APP.tapMood('happy')" style="font-size:22px;background:none;border:none;cursor:pointer;padding:4px;line-height:1;font-family:var(--ff)">&#x1F60A;</button>
-    <button onclick="APP.tapMood('neutral')" style="font-size:22px;background:none;border:none;cursor:pointer;padding:4px;line-height:1;font-family:var(--ff)">&#x1F610;</button>
-    <button onclick="APP.tapMood('regret')" style="font-size:22px;background:none;border:none;cursor:pointer;padding:4px;line-height:1;font-family:var(--ff)">&#x1F62C;</button>
+    <button onclick="APP.tapMood('happy')" class="btn-ghost-sm">&#x1F60A;</button>
+    <button onclick="APP.tapMood('neutral')" class="btn-ghost-sm">&#x1F610;</button>
+    <button onclick="APP.tapMood('regret')" class="btn-ghost-sm">&#x1F62C;</button>
   </div>
 
   <div id="iBanner">
@@ -5685,6 +5693,13 @@
     // ── TAG REGISTRY — dynamic tag persistence ────────────────────────
     const TAG_REGISTRY_KEY = 'sn_tag_registry';
     const TAG_PRUNE_DAYS = 90;
+    // LW-03: named constants replacing magic numbers
+    const MS_PER_DAY = 86400000;
+    const TAG_PRUNE_MS = TAG_PRUNE_DAYS * MS_PER_DAY;
+    const WEEK_MS = 7 * MS_PER_DAY;
+    const MAX_AMT = 9999999;
+    const BUDGET_WARN_PCT = 0.8;
+
 
     function _loadTagRegistry() {
       try {
@@ -5695,7 +5710,7 @@
     }
 
     function _saveTagRegistry(registry) {
-      try { localStorage.setItem(TAG_REGISTRY_KEY, JSON.stringify(registry)); } catch(e) {}
+      try { localStorage.setItem(TAG_REGISTRY_KEY, JSON.stringify(registry)); } catch(e) { console.warn("[catch]", e); }
     }
 
     function recordTagUsage(tagName) {
@@ -5714,13 +5729,14 @@
 
     function pruneOldTags() {
       const registry = _loadTagRegistry();
-      const cutoff = Date.now() - TAG_PRUNE_DAYS * 86400000;
+      const cutoff = Date.now() - TAG_PRUNE_MS;
       registry.tags = registry.tags.filter(t => (t.lastUsed || 0) >= cutoff);
       _saveTagRegistry(registry);
     }
 
+    let _tagsPruned = false; // MQ-02: prune once per session
     function getDynamicTagList() {
-      pruneOldTags();
+      if (!_tagsPruned) { pruneOldTags(); _tagsPruned = true; } // MQ-02
       const registry = _loadTagRegistry();
       // Sort custom tags by recency
       const customTags = registry.tags
@@ -5761,6 +5777,7 @@
       whyBuyThis: true, smartSearch: true,
       story: true, mirror: true, spendTwin: true,
       weeklyDigest: true, budgetSuggest: true,
+      paydayMode: true, guiltFree: true, monthEndWarn: true,
     };
     function getAIConfig() {
       try {
@@ -5769,7 +5786,7 @@
       } catch(e) { return { ...AI_CONFIG_DEFAULT }; }
     }
     function saveAIConfig(cfg) {
-      try { localStorage.setItem('sn_ai_config', JSON.stringify(cfg)); } catch(e) {}
+      try { localStorage.setItem('sn_ai_config', JSON.stringify(cfg)); } catch(e) { console.warn("[catch]", e); }
     }
 
     // ── STORAGE GUARD ─────────────────────────────────────────────
@@ -6094,6 +6111,36 @@
       },
     };
 
+
+
+    // ── GLOBAL ERROR BOUNDARY ─────────────────────────────────────
+    window.onerror = function(msg, src, line, col, err) {
+      console.error('[window.onerror]', msg, 'at', src, line, col, err);
+      try { toast('⚠️ Unexpected error — app is still running'); } catch(_) { /* intentionally silent */ }
+      return false; // don't suppress default browser logging
+    };
+    window.onunhandledrejection = function(e) {
+      console.error('[unhandledRejection]', e.reason);
+      try { toast('⚠️ Background error — please retry'); } catch(_) { /* intentionally silent */ }
+    };
+    // ── APP METHOD ERROR GUARD ────────────────────────────────────
+    // Wraps every APP method: uncaught errors show a toast + log,
+    // never crash the UI silently. Applied after APP object is defined.
+    function _guardAPP(obj) {
+      Object.keys(obj).forEach(key => {
+        if (typeof obj[key] !== 'function') return;
+        const orig = obj[key].bind(obj);
+        obj[key] = function(...args) {
+          try {
+            return orig(...args);
+          } catch(err) {
+            console.error('[APP.' + key + ']', err);
+            try { toast('⚠️ Something went wrong — please retry'); } catch(_) { /* intentionally silent */ }
+          }
+        };
+      });
+      return obj;
+    }
     // ── STATE ─────────────────────────────────────────────────────
     let D = null;
     let S = { tab: 'home', sliceBk: null, histF: null, addSrc: null, addBkt: null, limVals: {}, setRole: null, setToggles: {}, unsaved: false, obRole: null, obPhoto: null, install: null, saveBusy: false, loginAttempts: 0, loginLockUntil: 0, monthOffset: 0, monthExpanded: null, _autoSaveTimer: null };
@@ -6104,6 +6151,49 @@
 
     // ── HELPERS ───────────────────────────────────────────────────
     function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;'); }
+    function hashPw(raw) { return md5((raw || '').trim()); } // CR-02: single canonical password hasher — never call md5() directly
+    function _safeGet(key, fallback) { if (!key) return fallback; try { const r = localStorage.getItem(key); if (!r) return fallback; const p = JSON.parse(r); return (p !== null && p !== undefined) ? p : fallback; } catch(e) { console.warn('[_safeGet]', key, e); return fallback; } } // CR-03
+    function normTxn(t) { if (!t || typeof t !== 'object') return { merchant:'Unknown', amount:0, bucket:null, source:null, tags:[], date:'', time:'', month:'' }; const amt = parseFloat(t.amount); return { ...t, merchant: (typeof t.merchant === 'string' && t.merchant.trim()) ? t.merchant.trim() : 'Unknown', amount: isFinite(amt) && amt >= 0 ? amt : 0, bucket: t.bucket || null, source: t.source || null, tags: Array.isArray(t.tags) ? t.tags : [], date: t.date || '', time: t.time || '', month: t.month || '' }; } // HR-02: hardened
+    let _saveTimer; function debouncedSave(d, ms) { if (!d) return; ms = ms || 300; clearTimeout(_saveTimer); _saveTimer = setTimeout(function(){ try { DB.save(d); } catch(e) { console.error('[debouncedSave]', e); toast('⚠️ Save failed'); } }, ms); } // HR-04
+    // ── TRANSACTION MUTATION HELPERS (DRY) ──────────────────
+    function _txnUpdate(id, patch) {
+      if (!id || !D || !Array.isArray(D.transactions)) { console.warn('[_txnUpdate] invalid args', id); return false; }
+      let found = false;
+      try {
+        D.transactions = D.transactions.map(t => {
+          if (t.id !== id) return t;
+          found = true;
+          return typeof patch === 'function' ? patch(t) : { ...t, ...patch };
+        });
+      } catch(e) { console.error('[_txnUpdate]', e); }
+      return found;
+    }
+    function _txnDelete(id) {
+      if (!id || !D || !Array.isArray(D.transactions)) { console.warn('[_txnDelete] invalid args', id); return false; }
+      const before = D.transactions.length;
+      try { D.transactions = D.transactions.filter(t => t.id !== id); } catch(e) { console.error('[_txnDelete]', e); return false; }
+      return D.transactions.length < before;
+    }
+    function _mkTxnId() { return 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 5); } // extra entropy for uniqueness
+    function _fmtDate(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''; } catch(e) { return ''; } }
+    function _fmtTime(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''; } catch(e) { return ''; } }
+    function _fmtMonth(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : ''; } catch(e) { return ''; } }
+    function _commitSave(msg) {
+      try {
+        DB.save(D);
+        if (APP && APP.markUnsaved) APP.markUnsaved();
+        if (msg) toast(msg);
+      } catch(e) {
+        console.error('[_commitSave]', e);
+        toast('⚠️ Save failed — storage may be full');
+      }
+    }
+    function _confirmDelete(onConfirm) {
+      modal('Delete?', 'Cannot be undone.', [
+        { l: 'Cancel', c: 'mb-nil', a: () => APP.cm() },
+        { l: 'Delete', c: 'mb-err', a: onConfirm }
+      ]);
+    }
     function fmt(n) { if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`; if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`; return `₹${n}`; }
     function fmtF(n) { return '₹' + (isFinite(+n) ? +n : 0).toLocaleString('en-IN'); }
     function fmtINR(n) { if (!n && n !== 0) return ''; return Number(n).toLocaleString('en-IN'); }
@@ -6114,7 +6204,20 @@
       return `<span style="font-size:${Math.round(s * .38)}px;font-weight:800;color:#fff">${lt}</span>`;
     }
     function ico(m) { if (!m) return '💸'; const lo = m.toLowerCase(); for (const r of ICONS) if (r.kw.some(k => lo.includes(k))) return r.i; return '💸'; }
-    function summary(monthStr) { const s = { total: 0 }; Object.keys(BUCKETS).forEach(k => s[k] = 0); (D?.transactions || []).forEach(t => { if (t.bucket && BUCKETS[t.bucket] && (!monthStr || t.month === monthStr)) { s[t.bucket] += t.amount; s.total += t.amount; } }); return s; }
+
+    // ── SHARED EXPORT HTML BUILDER ────────────────────────────────
+    function _buildReportHtml({ eyebrow, title, amount, subtitle, bCards, rows, txnCount, footerYear }) {
+      const css = "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:20px;-webkit-font-smoothing:antialiased}table{width:100%;border-collapse:collapse}td{padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#334155}.w{max-width:700px;margin:0 auto}";
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spend-na — ${title}</title><style>${css}</style></head><body><div class="w"><div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:20px;padding:28px;margin-bottom:20px"><div style="font-size:11px;color:#0ea5e9;font-weight:700;letter-spacing:2px;margin-bottom:6px">SPEND-NA · ${eyebrow}</div><div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px">${title}</div><div style="font-size:40px;font-weight:800;color:#0ea5e9;margin-top:12px">₹${amount}</div><div style="font-size:13px;color:#94a3b8;margin-top:4px">${subtitle}</div></div><div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">${bCards}</div><div style="background:white;border-radius:16px;overflow:hidden;margin-bottom:16px"><div style="padding:16px 20px;border-bottom:1px solid #f1f5f9"><strong>${txnCount}</strong></div><table><tbody>${rows}</tbody></table></div><div style="text-align:center;padding:20px;color:#94a3b8;font-size:11px">Generated by Spend-na · 🔒 All data stays on your device · © Sandeep Hakki · hakki.in${footerYear ? ' · ' + footerYear : ''}</div></div></body></html>`;
+    }
+    // HR-01: memoized summary — cache invalidated when transaction count or lastSaved changes
+    let _summaryCache = {}, _summaryCacheKey = {};
+    function summary(monthStr) {
+      const key = (D?.transactions||[]).length + '_' + (D?.lastSaved||'') + '_' + (monthStr||'');
+      if (_summaryCacheKey[monthStr||'all'] === key && _summaryCache[monthStr||'all']) return _summaryCache[monthStr||'all'];
+      const s = { total: 0 }; Object.keys(BUCKETS).forEach(k => s[k] = 0); (D?.transactions || []).forEach(t => { if (t.bucket && BUCKETS[t.bucket] && (!monthStr || t.month === monthStr)) { const a = isFinite(+t.amount) ? +t.amount : 0; s[t.bucket] += a; s.total += a; } }); // hardened: NaN-safe
+      _summaryCacheKey[monthStr||'all'] = key; _summaryCache[monthStr||'all'] = s; return s;
+    }
     function offsetMonthStr(offset) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset); return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); }
     function offsetMonthLong(offset) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset); return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
     function pending() { return (D?.transactions || []).filter(t => !t.bucket).length; }
@@ -6146,7 +6249,7 @@
     function modal(title, body, btns) {
       document.getElementById('mT').textContent = title;
       document.getElementById('mB').innerHTML = body;
-      document.getElementById('mBs').innerHTML = btns.map((b, i) => `<button class="mb ${b.c}" id="mb${i}">${b.l}</button>`).join('');
+      document.getElementById('mBs').innerHTML = btns.map((b, i) => `<button class="mb ${esc(b.c || '')}" id="mb${i}">${esc(b.l)}</button>`).join(''); // CR-01: escape class+label to prevent XSS
       btns.forEach((b, i) => { document.getElementById('mb' + i).onclick = b.a; });
       document.getElementById('modal').classList.add('on');
     }
@@ -6344,16 +6447,16 @@
             if (until > Date.now()) { S.loginLockUntil = until; }
             else { sessionStorage.removeItem('sn_lock_until'); }
           }
-        } catch(e) {}
+        } catch(e) { console.warn("[catch]", e); }
       },
       unlock() {
         const now = Date.now();
         if (S.loginLockUntil > now) { toast(`Too many attempts. Wait ${Math.ceil((S.loginLockUntil - now) / 1000)}s.`); return; }
         const pw = (document.getElementById('lkIn').value || '').trim();
         if (!pw) return;
-        if (md5(pw) === D.passwordHash) {
+        if (hashPw(pw) === D.passwordHash) {
           S.loginAttempts = 0; S.loginLockUntil = 0;
-          try { sessionStorage.removeItem('sn_lock_until'); } catch(e) {}
+          try { sessionStorage.removeItem('sn_lock_until'); } catch(e) { console.warn("[catch]", e); }
           document.getElementById('lkErr').textContent = '';
           this.launch();
         } else {
@@ -6361,7 +6464,7 @@
           if (S.loginAttempts >= 5) {
             S.loginLockUntil = Date.now() + 30000;
             S.loginAttempts = 0;
-            try { sessionStorage.setItem('sn_lock_until', String(S.loginLockUntil)); } catch(e) {}
+            try { sessionStorage.setItem('sn_lock_until', String(S.loginLockUntil)); } catch(e) { console.warn("[catch]", e); }
             document.getElementById('lkErr').textContent = 'Too many attempts. Locked for 30s.';
           }
           else { document.getElementById('lkErr').textContent = `Wrong password. ${5 - S.loginAttempts} attempt${5 - S.loginAttempts !== 1 ? 's' : ''} left.`; }
@@ -6400,8 +6503,8 @@
         modal(
           '🔑 Set New Password',
           `<div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
-        <input id="newPw1" type="password" autocomplete="new-password" style="width:100%;padding:12px;border:1.5px solid var(--fog);border-radius:var(--r);font-size:16px;outline:none" placeholder="New password (min 4 chars)">
-        <input id="newPw2" type="password" autocomplete="new-password" style="width:100%;padding:12px;border:1.5px solid var(--fog);border-radius:var(--r);font-size:16px;outline:none" placeholder="Confirm new password">
+        <input id="newPw1" type="password" autocomplete="new-password" class="input-std" placeholder="New password (min 4 chars)">
+        <input id="newPw2" type="password" autocomplete="new-password" class="input-std" placeholder="Confirm new password">
         <div id="newPwErr" style="font-size:11px;color:var(--err);min-height:16px"></div>
       </div>`,
           [
@@ -6414,7 +6517,7 @@
                 if (p1.length < 4) { er.textContent = 'Minimum 4 characters'; return; }
                 if (p1 !== p2) { er.textContent = 'Passwords do not match'; return; }
                 // Apply new password and restore all data
-                data.passwordHash = md5(p1);
+                data.passwordHash = hashPw(p1);
                 D = data;
                 DB.save(D);
                 this.cm();
@@ -6486,7 +6589,7 @@
         const pw = document.getElementById('obPw1').value.trim();
         const role = ROLES[S.obRole], fn = nm.split(' ')[0];
         D = DB.empty();
-        D.passwordHash = md5(pw);
+        D.passwordHash = hashPw(pw);
         D.profile = { name: nm, role: S.obRole, photo: S.obPhoto || null, dob: document.getElementById('obDob').value.trim(), city: document.getElementById('obCity').value.trim(), quote: document.getElementById('obQuote').value.trim() || `${role.e} Every rupee has a story, ${fn}. Make yours count.` };
         D.limits = { ...role.lim };
         DB.save(D);
@@ -6560,13 +6663,13 @@
         try {
           const lnWarn = getLateNightWarning();
           if (lnWarn) msgs.push({ dot: '#8b5cf6', text: lnWarn, action: 'History ›', target: 'history' });
-        } catch(e) {}
+        } catch(e) { console.warn("[catch]", e); }
 
         // v5.0 AI: Salary Day Intelligence
         try {
           const salMsg = getSalaryDayIntelligence();
           if (salMsg) msgs.push({ dot: '#10b981', text: salMsg, action: 'Sources ›', target: 'sources' });
-        } catch(e) {}
+        } catch(e) { console.warn("[catch]", e); }
 
         msgs.push({ dot: '#f59e0b', text: '💡 Tag your spends to track events like birthdays, travel and festivals separately', action: 'Add ›', target: 'add' });
         msgs.push({ dot: '#0ea5e9', text: '💾 Save your data file regularly — it\'s your backup AND your password recovery key', action: 'Settings ›', target: 'settings' });
@@ -6576,7 +6679,7 @@
         const hasSources = (sdHome.sources || []).some(s => s.month === currentMonth);
         if (!hasSources) msgs.push({ dot: '#10b981', text: '💰 Add your income to Sources to see exactly how much you have left this month', action: 'Sources ›', target: 'sources' });
         Object.entries(D.limits || {}).forEach(([k, lim]) => {
-          if (lim > 0 && sm[k] >= lim * 0.8) {
+          if (lim > 0 && sm[k] >= lim * BUDGET_WARN_PCT) {
             const pct = Math.round((sm[k] / lim) * 100);
             const isOver = sm[k] > lim;
             msgs.push({ dot: isOver ? '#ef4444' : '#f59e0b', text: `${isOver ? '⚠' : '⚡'} ${BUCKETS[k]?.l || k} is ${isOver ? 'over' : 'at ' + pct + '% of'} your monthly limit`, action: 'Limits ›', target: 'limits' });
@@ -6672,7 +6775,7 @@
         body.classList.remove('focus-mode', 'focus-comfortable', 'focus-large');
         const next = (current + 1) % 3;
         if (next > 0) body.classList.add(levels[next]);
-        try { localStorage.setItem('sn_focus_level', String(next)); } catch(e) {}
+        try { localStorage.setItem('sn_focus_level', String(next)); } catch(e) { console.warn("[catch]", e); }
         this._updateFocusBadge(next, labels[next]);
         toast(`Text size: ${labels[next]}`);
       },
@@ -7164,8 +7267,8 @@
       </div>`).join('');
       },
       classify(id, bkt) {
-        D.transactions = D.transactions.map(t => t.id === id ? { ...t, bucket: bkt } : t);
-        DB.save(D); this.markUnsaved();
+        _txnUpdate(id, { bucket: bkt });
+        _commitSave();
         const card = document.getElementById('tc_' + id);
         if (card) { card.style.transition = 'all .28s ease'; card.style.opacity = '0'; card.style.transform = 'translateX(48px)'; setTimeout(() => this.r_sort(), 300); }
         const pend = pending(), badge = document.getElementById('tBadge');
@@ -7175,7 +7278,7 @@
       delTxn(id) {
         modal('Delete transaction?', 'Cannot be undone.', [
           { l: 'Cancel', c: 'mb-nil', a: () => this.cm() },
-          { l: 'Delete', c: 'mb-err', a: () => { D.transactions = D.transactions.filter(t => t.id !== id); DB.save(D); this.markUnsaved(); this.cm(); this.r_sort(); toast('Deleted'); } },
+          { l: 'Delete', c: 'mb-err', a: () => { _txnDelete(id); _commitSave('Deleted'); this.cm(); this.r_sort(); } },
         ]);
       },
 
@@ -7191,7 +7294,7 @@
         if (subEl) subEl.innerHTML = `<button onclick="APP._mmNav(-1)" style="background:none;border:none;cursor:pointer;padding:2px 8px;font-size:14px;color:var(--teal)" aria-label="Previous month">‹</button><span style="font-size:11px;color:var(--slate)">${mLong}</span><button onclick="APP._mmNav(1)" ${isCurrentMonth ? 'disabled aria-disabled="true"' : ''} style="background:none;border:none;padding:2px 8px;font-size:14px;color:${isCurrentMonth ? 'var(--fog)' : 'var(--teal)'};cursor:${isCurrentMonth ? 'not-allowed' : 'pointer'}" aria-label="Next month">›</button>`;
         const bodyEl = document.getElementById('mmBody');
         if (total === 0) {
-          bodyEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;text-align:center"><div style="font-size:48px;margin-bottom:16px">📊</div><div style="font-size:22px;font-weight:800;color:var(--ink);margin-bottom:8px">${isCurrentMonth ? 'Nothing sorted yet' : 'No data for this month'}</div><div style="font-size:14px;color:var(--slate);margin-bottom:28px;line-height:1.6">${isCurrentMonth ? 'Add spends and sort them<br>to see your monthly picture.' : 'No sorted transactions found<br>for ' + mLong + '.'}</div>${isCurrentMonth ? `<button onclick="APP.go('add')" style="background:var(--teal);border:none;border-radius:var(--r);padding:13px 28px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add a spend ›</button>` : ''}</div>`;
+          bodyEl.innerHTML = `<div class="empty-state"><div style="font-size:48px;margin-bottom:16px">📊</div><div style="font-size:22px;font-weight:800;color:var(--ink);margin-bottom:8px">${isCurrentMonth ? 'Nothing sorted yet' : 'No data for this month'}</div><div style="font-size:14px;color:var(--slate);margin-bottom:28px;line-height:1.6">${isCurrentMonth ? 'Add spends and sort them<br>to see your monthly picture.' : 'No sorted transactions found<br>for ' + mLong + '.'}</div>${isCurrentMonth ? `<button onclick="APP.go('add')" class="btn-teal">Add a spend ›</button>` : ''}</div>`;
           return;
         }
         const txns = (D.transactions || []).filter(t => t.bucket && t.month === mStr);
@@ -7305,7 +7408,7 @@
         <div style="font-size:48px;margin-bottom:16px">◈</div>
         <div style="font-size:20px;font-weight:800;color:var(--ink);margin-bottom:8px">No insights yet</div>
         <div style="font-size:14px;color:var(--slate);text-align:center;line-height:1.6;margin-bottom:24px">Add some spends and<br>insights will appear here.</div>
-        <button onclick="APP.go('add')" style="background:var(--teal);border:none;border-radius:var(--r);padding:13px 28px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add first spend ›</button>
+        <button onclick="APP.go('add')" class="btn-teal">Add first spend ›</button>
       </div>`;
           return;
         }
@@ -7388,7 +7491,7 @@
 
         // ── Limits check ──
         const overLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] > v);
-        const nearLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] >= v * 0.8 && bTotals[k] <= v);
+        const nearLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] >= v * BUDGET_WARN_PCT && bTotals[k] <= v);
 
         // ── Tag summary (lifetime totals across ALL months) ──
         const tagTotals = {};
@@ -7439,7 +7542,7 @@
           const pct = total > 0 ? Math.round((amt / total) * 100) : 0;
           const lim = D.limits[k] || 0;
           const isOver = lim > 0 && amt > lim;
-          const isNear = lim > 0 && amt >= lim * 0.8 && !isOver;
+          const isNear = lim > 0 && amt >= lim * BUDGET_WARN_PCT && !isOver;
           return `<div class="ins-bar-row">
             <div class="ins-bar-label">${c.l}</div>
             <div class="ins-bar-track">
@@ -7528,7 +7631,7 @@
         const total = sm.total;
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0, lim = D.limits[k] || 0, isOver = lim > 0 && amt > lim; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px;border:2px solid ${isOver ? '#ef4444' : c.cm}"><div style="font-size:10px;color:${c.c};font-weight:700;letter-spacing:1px">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${isOver ? '#ef4444' : c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px">${pct}%${lim > 0 ? ` of ₹${lim.toLocaleString('en-IN')} limit` : ''}</div>${isOver ? `<div style="font-size:10px;color:#ef4444;font-weight:700;margin-top:4px">⚠ OVER LIMIT</div>` : ''}</div>`; }).join('');
         const rows = txns.map(t => { const cfg = BUCKETS[t.bucket]; return `<tr><td>${t.date}</td><td><strong>${t.merchant}</strong></td><td style="text-align:right;font-weight:700">₹${t.amount.toLocaleString('en-IN')}</td><td style="text-align:center"><span style="background:${cfg.cl};color:${cfg.c};font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px">${cfg.l}</span></td></tr>`; }).join('');
-        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spend-na — My Month ${month}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:20px;-webkit-font-smoothing:antialiased}table{width:100%;border-collapse:collapse}td{padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#334155}.w{max-width:700px;margin:0 auto}</style></head><body><div class="w"><div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:20px;padding:28px;margin-bottom:20px"><div style="font-size:11px;color:#0ea5e9;font-weight:700;letter-spacing:2px;margin-bottom:6px">SPEND-NA · MY MONTH</div><div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px">${month}</div><div style="font-size:40px;font-weight:800;color:#0ea5e9;margin-top:12px">₹${total.toLocaleString('en-IN')}</div><div style="font-size:13px;color:#94a3b8;margin-top:4px">${txns.length} sorted transactions</div></div><div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">${bCards}</div><div style="background:white;border-radius:16px;overflow:hidden;margin-bottom:16px"><div style="padding:16px 20px;border-bottom:1px solid #f1f5f9"><strong>Transactions this month (${txns.length})</strong></div><table><tbody>${rows}</tbody></table></div><div style="text-align:center;padding:20px;color:#94a3b8;font-size:11px">Generated by Spend-na · 🔒 All data stays on your device · © Sandeep Hakki · hakki.in</div></div></body></html>`;
+        const html = _buildReportHtml({ eyebrow: 'MY MONTH', title: month, amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} sorted transactions`, bCards, rows, txnCount: `Transactions this month (${txns.length})` });
         const fname = `spend-na-my-month-${month.replace(/\s+/g, '-')}.html`;
         const blob = new Blob([html], { type: 'text/html' });
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([html], fname, { type: 'text/html' })] })) {
@@ -7609,7 +7712,7 @@
         }
 
         const q = (document.getElementById('srchIn')?.value || '').toLowerCase();
-        const _searchTerms = expandSearchQuery(q);
+        const _searchTerms = typeof expandSearchQuery === 'function' ? expandSearchQuery(q) : [q].filter(Boolean); // HR-05: null guard
         const filt = all.filter(t => {
           const ms = !q || _searchTerms.some(term => (t.merchant||'').toLowerCase().includes(term) || String(t.amount).includes(term));
           const mb = S.histF == null ? true
@@ -7629,7 +7732,7 @@
 
         if (filt.length === 0) {
           const isEmpty = all.length === 0;
-          listEl.innerHTML = sortBar + `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;text-align:center"><div style="font-size:52px;margin-bottom:16px">${isEmpty ? '\u{1F4B8}' : '\u{1F50D}'}</div><div style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">${isEmpty ? 'No transactions yet' : 'Nothing found'}</div><div style="font-size:14px;color:var(--slate);line-height:1.6">${isEmpty ? 'Add your first spend<br>to start tracking your money.' : 'Try a different search<br>or filter.'}</div>${isEmpty ? `<button onclick="APP.go('add')" style="margin-top:24px;background:var(--teal);border:none;border-radius:var(--r);padding:12px 24px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add a spend \u203a</button>` : ''}</div>`;
+          listEl.innerHTML = sortBar + `<div class="empty-state"><div style="font-size:52px;margin-bottom:16px">${isEmpty ? '\u{1F4B8}' : '\u{1F50D}'}</div><div style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">${isEmpty ? 'No transactions yet' : 'Nothing found'}</div><div style="font-size:14px;color:var(--slate);line-height:1.6">${isEmpty ? 'Add your first spend<br>to start tracking your money.' : 'Try a different search<br>or filter.'}</div>${isEmpty ? `<button onclick="APP.go('add')" style="margin-top:24px;background:var(--teal);border:none;border-radius:var(--r);padding:12px 24px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">Add a spend \u203a</button>` : ''}</div>`;
           return;
         }
 
@@ -7667,7 +7770,7 @@
                   <label class="ie-lbl" style="display:block;margin-bottom:4px">DATE</label>
                   <div style="display:flex;gap:8px;margin-bottom:10px">
                     <input class="s-in" style="font-size:13px;padding:8px 10px;flex:1" type="text" id="ie-date-${t.id}" value="${esc(t.date||'')}" maxlength="20" placeholder="e.g. 23 Mar" inputmode="text">
-                    <button onclick="APP.hSaveDate('${t.id}')" style="background:var(--teal);color:#fff;border:none;border-radius:var(--r);padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:var(--ff)">Save Date</button>
+                    <button onclick="APP.hSaveDate('${t.id}')" class="btn-teal-sm">Save Date</button>
                   </div>
                   <label class="ie-lbl" style="display:block;margin-bottom:4px">DESCRIPTION</label>
                   <input class="s-in" style="font-size:13px;padding:8px 10px;margin-bottom:10px" type="text" id="ie-desc-${t.id}" value="${esc(t.merchant||'')}" maxlength="60" placeholder="e.g. Swiggy, Coffee">
@@ -7720,18 +7823,27 @@
         document.getElementById('fBar').querySelectorAll('.fp').forEach(function(btn) {
           btn.addEventListener('click', function() { APP.setHF(btn.dataset.filterkey); });
         });
-        // FIX-6C: swipe gestures
+        // FIX-6C: swipe gestures — HR-03: cleanup old listeners before re-attaching
+        if (listEl._swipeCleanup) listEl._swipeCleanup();
         (function initSwipeActions(container) {
-          var startX=0,startY=0,activeWrap=null;
-          container.addEventListener('touchstart',function(e){startX=e.touches[0].clientX;startY=e.touches[0].clientY;activeWrap=e.target.closest('.htxn-wrap');},{passive:true});
-          container.addEventListener('touchend',function(e){
+          let startX=0,startY=0,activeWrap=null; // LW-02: let not var
+          function onSwipeStart(e){startX=e.touches[0].clientX;startY=e.touches[0].clientY;activeWrap=e.target.closest('.htxn-wrap');}
+          function onSwipeEnd(e){
             if(!activeWrap)return;
-            var dx=e.changedTouches[0].clientX-startX,dy=Math.abs(e.changedTouches[0].clientY-startY);
+            const dx=e.changedTouches[0].clientX-startX,dy=Math.abs(e.changedTouches[0].clientY-startY);
             if(dy>30)return;
             if(dx<-50){container.querySelectorAll('.htxn-wrap.swiped').forEach(function(w){if(w!==activeWrap)w.classList.remove('swiped');});activeWrap.classList.add('swiped');}
             else if(dx>20){activeWrap.classList.remove('swiped');}
-          },{passive:true});
-          container.addEventListener('touchstart',function(e){if(!e.target.closest('.htxn-wrap.swiped'))container.querySelectorAll('.htxn-wrap.swiped').forEach(function(w){w.classList.remove('swiped');});},{passive:true});
+          }
+          function onSwipeClear(e){if(!e.target.closest('.htxn-wrap.swiped'))container.querySelectorAll('.htxn-wrap.swiped').forEach(function(w){w.classList.remove('swiped');});}
+          container.addEventListener('touchstart',onSwipeStart,{passive:true});
+          container.addEventListener('touchend',onSwipeEnd,{passive:true});
+          container.addEventListener('touchstart',onSwipeClear,{passive:true});
+          container._swipeCleanup = function(){
+            container.removeEventListener('touchstart',onSwipeStart);
+            container.removeEventListener('touchend',onSwipeEnd);
+            container.removeEventListener('touchstart',onSwipeClear);
+          };
         })(listEl);
       },
       toggleMonthGroup(mon) {
@@ -7745,15 +7857,15 @@
       },
       setHistSort(s) { S.histSort = s; this.r_history(); },
       tgEdit(id) { const el = document.getElementById('ie_' + id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
-      hClassify(id, bkt) { D.transactions = D.transactions.map(t => t.id === id ? { ...t, bucket: bkt } : t); DB.save(D); this.markUnsaved(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast(`→ ${BUCKETS[bkt].l}`); },
+      hClassify(id, bkt) { _txnUpdate(id, { bucket: bkt }); debouncedSave(D); this.markUnsaved(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast(`→ ${BUCKETS[bkt].l}`); }, // HR-04
       hSaveDesc(id) {
         // FIX-7: save edited description from inline edit panel
         const inp = document.getElementById('ie-desc-' + id);
         if (!inp) return;
         const val = inp.value.trim();
         if (!val) return;
-        D.transactions = D.transactions.map(t => t.id === id ? { ...t, merchant: val } : t);
-        DB.save(D); this.markUnsaved();
+        _txnUpdate(id, { merchant: val });
+        _commitSave();
         document.getElementById('fBar').innerHTML = '';
         this.r_history(); toast('Description updated ✓');
       },
@@ -7762,10 +7874,9 @@
         modal('Delete this spend?', 'This cannot be undone.', [
           { l: 'Cancel', c: 'mb-nil', a: () => this.cm() },
           { l: 'Delete', c: 'mb-err', a: () => {
-            D.transactions = D.transactions.filter(t => t.id !== id);
-            DB.save(D); this.markUnsaved(); this.cm();
+            _txnDelete(id); _commitSave('Deleted'); this.cm();
             document.getElementById('fBar').innerHTML = '';
-            this.r_history(); toast('Deleted');
+            this.r_history();
           }}
         ]);
       },
@@ -7780,7 +7891,7 @@
         if (typeof AI !== 'undefined') { AI.parsed = null; AI.voiceActive = false; }
         APP.aiVoiceToggle();
       },
-      hDel(id) { modal('Delete?', 'Cannot be undone.', [{ l: 'Cancel', c: 'mb-nil', a: () => this.cm() }, { l: 'Delete', c: 'mb-err', a: () => { D.transactions = D.transactions.filter(t => t.id !== id); DB.save(D); this.markUnsaved(); this.cm(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast('Deleted'); } }]); },
+      hDel(id) { _confirmDelete(() => { _txnDelete(id); _commitSave('Deleted'); this.cm(); document.getElementById('fBar').innerHTML = ''; this.r_history(); }); },
 
       exportHTML() {
         const txns = D.transactions || [];
@@ -7788,7 +7899,7 @@
         const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), sm = summary();
         const rows = txns.map(t => { const cfg = t.bucket ? BUCKETS[t.bucket] : null; return `<tr><td>${t.date}</td><td><strong>${t.merchant}</strong></td><td style="text-align:right;font-weight:700">₹${t.amount.toLocaleString('en-IN')}</td><td style="text-align:center"><span style="background:${cfg ? cfg.cl : '#f1f5f9'};color:${cfg ? cfg.c : '#94a3b8'};font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px">${cfg ? cfg.l : '—'}</span></td></tr>`; }).join('');
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px"><div style="font-size:10px;color:${c.c};font-weight:700">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:4px">${pct}%</div></div>`; }).join('');
-        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spend-na History — ${month}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:20px;-webkit-font-smoothing:antialiased}table{width:100%;border-collapse:collapse}td{padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#334155}.w{max-width:700px;margin:0 auto}</style></head><body><div class="w"><div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:20px;padding:28px;margin-bottom:20px"><div style="font-size:11px;color:#0ea5e9;font-weight:700;letter-spacing:2px;margin-bottom:6px">SPEND-NA · HISTORY</div><div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px">${month}</div><div style="font-size:40px;font-weight:800;color:#0ea5e9;margin-top:12px">₹${total.toLocaleString('en-IN')}</div><div style="font-size:13px;color:#94a3b8;margin-top:4px">${txns.length} total records</div></div><div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">${bCards}</div><div style="background:white;border-radius:16px;overflow:hidden;margin-bottom:16px"><div style="padding:16px 20px;border-bottom:1px solid #f1f5f9"><strong>All Transactions (${txns.length} total records)</strong></div><table><tbody>${rows}</tbody></table></div><div style="text-align:center;padding:20px;color:#94a3b8;font-size:11px">Generated by Spend-na · 🔒 All data stays on your device · © Sandeep Hakki · hakki.in · 2026</div></div></body></html>`;
+        const html = _buildReportHtml({ eyebrow: 'HISTORY', title: month, amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} total records`, bCards, rows, txnCount: `All Transactions (${txns.length} total records)`, footerYear: '2026' });
         const fname = `spend-na-history-${month.replace(/\s+/g, '-')}.html`;
         const blob = new Blob([html], { type: 'text/html' });
         // BUG-8: use direct download only — navigator.share causes two files on iOS
@@ -7857,11 +7968,11 @@
         const amtEl = document.getElementById('addAmt');
         const amt = parseINR(amtEl?.value || '0');
         const desc = (document.getElementById('addDesc')?.value || '').trim();
-        const ok = amt > 0 && amt <= 9999999 && S.addSrc && S.addBkt;
+        const ok = amt > 0 && amt <= MAX_AMT && S.addSrc && S.addBkt;
         const btn = document.getElementById('addSave'); if (btn) { btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.3'; }
         // Real-time validation feedback
         const amtHero = amtEl?.closest('.amt-hero');
-        if (amtEl && amt > 0 && amt > 9999999) { amtEl.style.color = 'var(--err)'; }
+        if (amtEl && amt > 0 && amt > MAX_AMT) { amtEl.style.color = 'var(--err)'; }
         else if (amtEl) { amtEl.style.color = ''; }
       },
       saveManual() {
@@ -7870,7 +7981,7 @@
         const amt = parseINR(amtEl?.value || '0');
         const desc = (document.getElementById('addDesc')?.value || '').trim();
         if (!amt || amt <= 0) { toast('Please enter an amount'); return; }
-        if (amt > 9999999) { toast('Amount too large'); return; }
+        if (amt > MAX_AMT) { toast('Amount too large'); return; }
         if (!S.addSrc) { toast('Please select a payment method'); return; }
         if (!S.addBkt) { toast('Please select a bucket'); return; }
         const btn = document.getElementById('addSave');
@@ -7955,15 +8066,15 @@
           <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:2px;margin-bottom:8px">FOLDER BACKUP (RECOMMENDED)</div>
           <div class="act" onclick="APP.exportZipFolder()" style="cursor:pointer"><div class="act-ic">🗂️</div><div class="act-inf"><div class="act-t">Export folder backup</div><div class="act-s">ZIP with manifest + monthly files — safest option</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.importZipFolder()" style="cursor:pointer"><div class="act-ic">📥</div><div class="act-inf"><div class="act-t">Restore from folder backup</div><div class="act-s">Load a Spend-na ZIP backup file</div></div><div class="act-ar">›</div></div>
-          <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:2px;margin:14px 0 8px">SINGLE FILE (CLASSIC)</div>
+          <div class="txt-eyebrow-mist">SINGLE FILE (CLASSIC)</div>
           <div class="act" onclick="APP.saveFile()" style="cursor:pointer"><div class="act-ic">💾</div><div class="act-inf"><div class="act-t">Export single JSON file</div><div class="act-s">One file — all records combined</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.loadFile()" style="cursor:pointer"><div class="act-ic">📂</div><div class="act-inf"><div class="act-t">Import / restore JSON</div><div class="act-s">Load from a saved single-file backup</div></div><div class="act-ar">›</div></div>
-          <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:2px;margin:14px 0 8px">OTHER</div>
+          <div class="txt-eyebrow-mist">OTHER</div>
           <div class="act" onclick="APP.exportCurrentMonthShard()" style="cursor:pointer"><div class="act-ic">📦</div><div class="act-inf"><div class="act-t">Export this month only</div><div class="act-s">Save current month as a separate file</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.showAnnualWrap()" style="cursor:pointer"><div class="act-ic">🎉</div><div class="act-inf"><div class="act-t">See Annual Wrap 🎉</div><div class="act-s">Your year in rupees — beautiful summary</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.openMigrationWizard('settings')" style="cursor:pointer"><div class="act-ic">📱</div><div class="act-inf"><div class="act-t">Transfer to new device</div><div class="act-s">Move your data to another phone</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.shareBlank()" style="cursor:pointer"><div class="act-ic">🎁</div><div class="act-inf"><div class="act-t">Share app with a friend</div><div class="act-s">Send a blank copy — no personal data</div></div><div class="act-ar">›</div></div>
-          <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:2px;margin:14px 0 8px">STORAGE</div>
+          <div class="txt-eyebrow-mist">STORAGE</div>
           <div class="tgl-row"><div class="tgl-inf"><div class="tgl-lbl">Monthly file sharding</div><div class="tgl-sub">Keeps main file lean — past months saved separately</div></div><button class="tgl${FLAGS.get('data_sharding') ? ' on' : ''}" id="tgl-shard" onclick="FLAGS.set('data_sharding',!FLAGS.get('data_sharding'));this.classList.toggle('on');toast(FLAGS.get('data_sharding')?'Sharding on — months saved separately':'Sharding off')"><div class="tgl-k"></div></button></div>
           <div style="border-top:1px solid var(--fog);margin:12px 0 8px"></div>
           <div class="act" onclick="APP.clearAllFresh()" style="cursor:pointer"><div class="act-ic" style="color:var(--err)">🗑️</div><div class="act-inf"><div class="act-t" style="color:var(--err)">Clear all data</div><div class="act-s">Delete everything and start fresh</div></div><div class="act-ar">›</div></div>
@@ -8026,10 +8137,10 @@
       changePw() {
         const old = document.getElementById('pwOld')?.value || '', n1 = document.getElementById('pwN1')?.value || '', n2 = document.getElementById('pwN2')?.value || '';
         const er = document.getElementById('pwChErr');
-        if (md5(old) !== D.passwordHash) { er.textContent = 'Current password wrong'; return; }
+        if (hashPw(old) !== D.passwordHash) { er.textContent = 'Current password wrong'; return; }
         if (n1.length < 4) { er.textContent = 'Minimum 4 characters'; return; }
         if (n1 !== n2) { er.textContent = 'Passwords do not match'; return; }
-        D.passwordHash = md5(n1); DB.save(D); this.markUnsaved(); er.textContent = '';
+        D.passwordHash = hashPw(n1); DB.save(D); this.markUnsaved(); er.textContent = '';
         ['pwOld', 'pwN1', 'pwN2'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
         modal('Password Changed!', 'Save your data file now — the new password is stored inside it.', [
           { l: 'Save now', c: 'mb-ok', a: () => { this.cm(); this.saveFile(); } },
@@ -8084,6 +8195,10 @@
           ${row('weeklyDigest','Weekly Digest 📅','Monday morning summary')}
           <div class="ai-cfg-section">LIMITS</div>
           ${row('budgetSuggest','Smart Budget Suggestion','AI-suggested limits from history')}
+          ${row('monthEndWarn','Month-End Warning ⚠️','Near/over limit alert in last week')}
+          <div class="ai-cfg-section">HOME CARDS</div>
+          ${row('paydayMode','Payday Mode 💰','Daily budget left from income sources')}
+          ${row('guiltFree','Guilt-Free Streak 🌿','Zero-spend day counter')}
           <div class="ai-cfg-section">TAGS</div>
           <button onclick="APP.showTagManager()" style="width:100%;text-align:left;background:rgba(255,255,255,.05);border:none;border-radius:var(--r);padding:12px 14px;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer;font-family:var(--ff)">🏷 Manage Tags</button>
         `;
@@ -8358,16 +8473,11 @@
 
       // History retroactive tagging
       hToggleTag(txnId, tag) {
-        D.transactions = D.transactions.map(t => {
-          if (t.id !== txnId) return t;
+        _txnUpdate(txnId, t => {
           const tags = t.tags || [];
-          const newTags = tags.includes(tag)
-            ? tags.filter(tg => tg !== tag)
-            : [...tags, tag];
-          return { ...t, tags: newTags };
+          return { ...t, tags: tags.includes(tag) ? tags.filter(g => g !== tag) : [...tags, tag] };
         });
-        DB.save(D);
-        this.markUnsaved();
+        debouncedSave(D); this.markUnsaved(); // HR-04
         this._refreshTxnTagUI(txnId);
       },
 
@@ -8509,7 +8619,7 @@
           <div style="font-size:52px;margin-bottom:16px">💰</div>
           <div style="font-size:20px;font-weight:800;color:var(--ink);margin-bottom:8px">Track all your income sources</div>
           <div style="font-size:14px;color:var(--slate);line-height:1.6;margin-bottom:24px">Add your salary, freelance income,<br>or any money you received this month.</div>
-          <button onclick="APP.openAddSource()" style="background:var(--teal);border:none;border-radius:var(--r);padding:13px 28px;font-size:14px;font-weight:700;color:#fff;cursor:pointer">+ Add Source</button>
+          <button onclick="APP.openAddSource()" class="btn-teal">+ Add Source</button>
         </div>`;
           return;
         }
@@ -8581,18 +8691,18 @@
           isEdit ? 'Edit Source' : '+ Add Source',
           `<div style="display:flex;flex-direction:column;gap:14px;margin-top:8px">
         <div>
-          <div style="font-size:10px;font-weight:700;color:var(--slate);letter-spacing:2px;margin-bottom:7px">SOURCE NAME</div>
+          <div class="txt-eyebrow">SOURCE NAME</div>
           <input id="srcName" class="add-in" type="text" inputmode="text" maxlength="60"
             placeholder="e.g. Salary, Freelance, Gift from Dad"
             value="${esc(prefill?.name || '')}">
         </div>
         <div>
-          <div style="font-size:10px;font-weight:700;color:var(--slate);letter-spacing:2px;margin-bottom:7px">AMOUNT RECEIVED (₹)</div>
+          <div class="txt-eyebrow">AMOUNT RECEIVED (₹)</div>
           <input id="srcAmt" class="add-in" type="number" inputmode="decimal" min="0.01" step="any"
             placeholder="₹ e.g. 50000" value="${prefill?.amount || ''}">
         </div>
         <div>
-          <div style="font-size:10px;font-weight:700;color:var(--slate);letter-spacing:2px;margin-bottom:7px">NOTE (optional)</div>
+          <div class="txt-eyebrow">NOTE (optional)</div>
           <input id="srcNote" class="add-in" type="text" inputmode="text" maxlength="100"
             placeholder="Optional — e.g. April salary, Client payment"
             value="${esc(prefill?.note || '')}">
@@ -8756,6 +8866,20 @@
     // ── HISTORY MERCHANT LOOKUP ───────────────────────────────────────
     // Returns {bkt, confidence, matchedDesc} or null
     // confidence: 3=exact, 2=contains, 1=word-overlap
+    // MQ-03: merchant index — built once, invalidated on new transactions
+    let _merchantIndex = null;
+    function _getMerchantIndex() {
+      if (_merchantIndex) return _merchantIndex;
+      _merchantIndex = {};
+      for (const t of (D && D.transactions ? D.transactions : [])) {
+        if (!t.merchant) continue;
+        const k = t.merchant.toLowerCase();
+        if (!_merchantIndex[k]) _merchantIndex[k] = t;
+      }
+      return _merchantIndex;
+    }
+    function _invalidateMerchantIndex() { _merchantIndex = null; }
+
     function _findHistoryMerchant(desc) {
       if (!desc || !D || !D.transactions || D.transactions.length === 0) return null;
       const needle = desc.toLowerCase().trim();
@@ -8809,7 +8933,7 @@
       ];
       for (const p of amtPatterns) {
         const m = text.match(p);
-        if (m) { const v = parseFloat(m[1].replace(/,/g,'')); if (v > 0 && v < 9999999) { amt = v; break; } }
+        if (m) { const v = parseFloat(m[1].replace(/,/g,'')); if (v > 0 && v < MAX_AMT) { amt = v; break; } }
       }
       if (!amt) return null;
 
@@ -8918,13 +9042,18 @@
         if (APP.renderAddTagChips) APP.renderAddTagChips();
       }
 
-      // Show history info in status
+      // Show history info in status (IMP-4: smart amount suggest + learned badge)
       const status = document.getElementById('aiStatus');
+      const lastAmt = _getLastAmount(parsed.desc);
       if (status && parsed.learnedFromHistory && parsed.historyInfo) {
         const count = (D && D.transactions ? D.transactions.filter(t => t.merchant && t.merchant.toLowerCase() === parsed.desc.toLowerCase()).length : 0);
-        status.textContent = count > 0
+        const learnedMsg = count > 0
           ? `✦ Learned from your history (${count} record${count>1?'s':''})`
           : '✦ Learned from your history';
+        const amtHint = lastAmt && lastAmt !== parsed.amt ? ` · Last time: ${fmtF(lastAmt)}` : '';
+        status.textContent = learnedMsg + amtHint;
+      } else if (status && lastAmt && lastAmt !== parsed.amt) {
+        status.textContent = `Last time at ${parsed.desc}: ${fmtF(lastAmt)}`;
       }
 
       APP.selBkt(parsed.bkt);
@@ -8953,8 +9082,12 @@
       const currentMonth = offsetMonthStr(0);
       const monthTxns = txns.filter(t => t.month === currentMonth);
 
+      // Pattern 0: merchant frequency alert (IMP-3)
+      const freqAlert = _merchantFreqAlert(desc, txns);
+      if (freqAlert) return freqAlert;
+
       // Pattern 1: same merchant this week
-      const weekAgo = Date.now() - 7 * 86400000;
+      const weekAgo = Date.now() - WEEK_MS;
       const sameRecent = txns.filter(t =>
         t.merchant && t.merchant.toLowerCase() === lower &&
         new Date(t.timestamp).getTime() > weekAgo
@@ -9067,7 +9200,7 @@
 
       if (insights.length === 0) return null;
       // Pick one insight — rotate by week number
-      const weekNum = Math.floor(Date.now() / (7*86400000));
+      const weekNum = Math.floor(Date.now() / (WEEK_MS));
       return insights[weekNum % insights.length];
     }
 
@@ -9170,7 +9303,7 @@
       try {
         const comparison = generateHonestComparison(monthStr);
         if (comparison) sentences.push(comparison);
-      } catch(e) {}
+      } catch(e) { console.warn("[catch]", e); }
 
       return sentences.join(' ');
     }
@@ -9219,15 +9352,15 @@
       const dailyBudget = totalLimit / 30;
       const todayTotal = (D.transactions||[]).filter(t=>t.date&&t.date.startsWith(today)).reduce((s,t)=>s+(t.amount||0),0);
       let streak = { count:0, lastDate:'', best:0 };
-      try { streak = JSON.parse(localStorage.getItem('sn_streak')||'{}'); } catch(e) {}
-      const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+      try { streak = JSON.parse(localStorage.getItem('sn_streak')||'{}'); } catch(e) { console.warn("[catch]", e); }
+      const yesterday = new Date(Date.now()-MS_PER_DAY).toISOString().slice(0,10);
       if (todayTotal <= dailyBudget) {
         if (streak.lastDate === yesterday) { streak.count = (streak.count||0)+1; }
         else if (streak.lastDate !== today) { streak.count = 1; }
         streak.lastDate = today;
         streak.best = Math.max(streak.best||0, streak.count);
       } else if (streak.lastDate !== today) { streak.count = 0; streak.lastDate = today; }
-      try { localStorage.setItem('sn_streak', JSON.stringify(streak)); } catch(e) {}
+      try { localStorage.setItem('sn_streak', JSON.stringify(streak)); } catch(e) { console.warn("[catch]", e); }
       return streak;
     }
 
@@ -9317,9 +9450,9 @@
       const now = new Date();
       if (now.getDay() !== 1) return null;
       const weekKey = now.getFullYear() + '-W' + Math.ceil(now.getDate()/7);
-      try { const saved=JSON.parse(localStorage.getItem('sn_weekly_digest')||'{}'); if(saved.week===weekKey) return saved.text; } catch(e) {}
-      const lastWeekStart = new Date(now-7*86400000).toISOString().slice(0,10);
-      const lastWeekEnd = new Date(now-86400000).toISOString().slice(0,10);
+      try { const saved=JSON.parse(localStorage.getItem('sn_weekly_digest')||'{}'); if(saved.week===weekKey) return saved.text; } catch(e) { console.warn("[catch]", e); }
+      const lastWeekStart = new Date(now-WEEK_MS).toISOString().slice(0,10);
+      const lastWeekEnd = new Date(now-MS_PER_DAY).toISOString().slice(0,10);
       const txns = (D?.transactions||[]).filter(t=>t.date>=lastWeekStart&&t.date<=lastWeekEnd);
       if (txns.length===0) return null;
       const total = txns.reduce((s,t)=>s+t.amount,0);
@@ -9331,7 +9464,7 @@
       const hvy=days.reduce((b,d)=>{const a=txns.filter(t=>t.date===d).reduce((s,t)=>s+t.amount,0);return a>(b.amt||0)?{d,amt:a}:b;},{});
       const heavyDay = hvy.d ? new Date(hvy.d+'T12:00:00').toLocaleDateString('en-IN',{weekday:'long'}) : '';
       const text = 'Last week: '+fmtF(total)+' \u00b7 '+txns.length+' spends \u00b7 Heaviest: '+heavyDay+' \u00b7 Top: '+(BUCKETS[topBktKey]?.l||'Mixed');
-      try { localStorage.setItem('sn_weekly_digest',JSON.stringify({week:weekKey,text})); } catch(e) {}
+      try { localStorage.setItem('sn_weekly_digest',JSON.stringify({week:weekKey,text})); } catch(e) { console.warn("[catch]", e); }
       return text;
     }
 
@@ -9393,11 +9526,11 @@
         if (!p.amt || p.amt <= 0) { toast('Please enter an amount'); return; }
         const now = new Date();
         const txn = {
-          id: `t_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          id: _mkTxnId(),
           timestamp: now.toISOString(),
-          date: now.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}),
-          time: now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}),
-          month: now.toLocaleDateString('en-IN',{month:'short',year:'numeric'}),
+          date: _fmtDate(now),
+          time: _fmtTime(now),
+          month: _fmtMonth(now),
           merchant: p.desc || 'Spend',
           amount: p.amt,
           bucket: p.bkt,
@@ -9407,6 +9540,7 @@
         D.transactions = [txn, ...(D.transactions||[])];
         // Remember last used source
         D.lastSrc = p.src;
+        _invalidateMerchantIndex(); // MQ-03
         DB.save(D); this.markUnsaved();
         _addTags = [];
         if (navigator.vibrate) navigator.vibrate(50);
@@ -9500,7 +9634,7 @@
           const card = document.getElementById('aiInsightCard');
           const textEl = document.getElementById('aiInsightText');
           if (!card || !textEl) return;
-          const d = JSON.parse(localStorage.getItem('sn_ai_insight') || '{}');
+          const d = _safeGet('sn_ai_insight', {}); // CR-03
           if (d.dismissed && d.week === _aiWeekKey()) { card.style.display = 'none'; return; }
           if (d.text && d.week === _aiWeekKey()) {
             textEl.textContent = d.text;
@@ -9511,7 +9645,7 @@
           if (!insight) { card.style.display = 'none'; return; }
           textEl.textContent = insight;
           card.style.display = 'block';
-          try { localStorage.setItem('sn_ai_insight', JSON.stringify({text: insight, week: _aiWeekKey()})); } catch(e) {}
+          try { localStorage.setItem('sn_ai_insight', JSON.stringify({text: insight, week: _aiWeekKey()})); } catch(e) { console.warn("[catch]", e); }
         } catch(e) {
           console.warn('AI insight render error:', e);
           const card = document.getElementById('aiInsightCard');
@@ -9523,7 +9657,7 @@
       APP.aiDismissInsight = function() {
         const card = document.getElementById('aiInsightCard');
         if (card) card.style.display = 'none';
-        try { const d = JSON.parse(localStorage.getItem('sn_ai_insight')||'{}'); d.dismissed = true; d.week = _aiWeekKey(); localStorage.setItem('sn_ai_insight', JSON.stringify(d)); } catch(e) {}
+        try { const d = JSON.parse(localStorage.getItem('sn_ai_insight')||'{}'); d.dismissed = true; d.week = _aiWeekKey(); localStorage.setItem('sn_ai_insight', JSON.stringify(d)); } catch(e) { console.warn("[catch]", e); }
       };
 
       // ── aiRenderForecast — render on home screen ──
@@ -9545,6 +9679,68 @@
           const card = document.getElementById('aiForecastCard');
           if (card) card.style.display = 'none';
         }
+      };
+
+      // ── IMP-1: aiRenderPayday — shows balance left + daily budget ──
+      APP.aiRenderPayday = function() {
+        const card = document.getElementById('aiPaydayCard');
+        if (!card) return;
+        if (!getAIConfig().paydayMode) { card.style.display = 'none'; return; }
+        try {
+          const info = _getPaydayInfo();
+          if (!info) { card.style.display = 'none'; return; }
+          const textEl = document.getElementById('aiPaydayText');
+          const subEl = document.getElementById('aiPaydaySub');
+          const leftSign = info.left < 0 ? '-' : '';
+          if (textEl) textEl.textContent = `${info.pct}% spent · ${leftSign}${fmtF(Math.abs(info.left))} left`;
+          if (subEl) subEl.textContent = info.dailyBudget > 0
+            ? `${info.daysLeft} days left · ≈ ${fmtF(info.dailyBudget)}/day`
+            : info.left < 0 ? `Over budget by ${fmtF(Math.abs(info.left))} 😬` : '';
+          card.style.display = 'block';
+        } catch(e) { if (card) card.style.display = 'none'; }
+      };
+
+      // ── IMP-2: aiRenderGuiltFree — shows zero-spend streak ──
+      APP.aiRenderGuiltFree = function() {
+        const card = document.getElementById('aiGuiltFreeCard');
+        if (!card) return;
+        if (!getAIConfig().guiltFree) { card.style.display = 'none'; return; }
+        try {
+          const streak = _getGuiltFreeStreak();
+          if (streak < 1) { card.style.display = 'none'; return; }
+          const textEl = document.getElementById('aiGuiltFreeText');
+          const plural = streak === 1 ? 'day' : 'days';
+          if (textEl) textEl.textContent = streak === 1
+            ? `Yesterday was a guilt-free day 🌿`
+            : `${streak} guilt-free ${plural} in a row — nice discipline! 🌿`;
+          card.style.display = 'block';
+        } catch(e) { if (card) card.style.display = 'none'; }
+      };
+
+      // ── IMP-5: aiRenderMonthEnd — warns about near/over limits last week ──
+      APP.aiRenderMonthEnd = function() {
+        const card = document.getElementById('aiMonthEndCard');
+        if (!card) return;
+        if (!getAIConfig().monthEndWarn) { card.style.display = 'none'; return; }
+        try {
+          // Check if dismissed this month
+          const curMon = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+          const warned = _safeGet('sn_monthend_warned', {}); // CR-03
+          if (warned.dismissed && warned.month === curMon) { card.style.display = 'none'; return; }
+          const warnings = _getMonthEndWarnings();
+          if (warnings.length === 0) { card.style.display = 'none'; return; }
+          const textEl = document.getElementById('aiMonthEndText');
+          if (textEl) {
+            textEl.innerHTML = warnings.map(w => {
+              const icon = w.over ? '🔴' : '🟡';
+              const msg = w.over
+                ? `${icon} ${w.cfg.l}: over by ${fmtF(w.spent - w.limit)}`
+                : `${icon} ${w.cfg.l}: ${Math.round(w.pct * 100)}% used — ${fmtF(w.limit - w.spent)} left`;
+              return `<div>${msg}</div>`;
+            }).join('');
+          }
+          card.style.display = 'block';
+        } catch(e) { if (card) card.style.display = 'none'; }
       };
 
       // ── aiRenderStory — render on month screen ──
@@ -9593,10 +9789,10 @@
         DB.save(D); this.markUnsaved();
         // Mark as shown this month
         try {
-          const shown = JSON.parse(localStorage.getItem('sn_mirror_shown')||'{}');
+          const shown = _safeGet('sn_mirror_shown', {}); // CR-03
           shown[AI.mirrorBucket] = offsetMonthStr(0);
           localStorage.setItem('sn_mirror_shown', JSON.stringify(shown));
-        } catch(e) {}
+        } catch(e) { console.warn("[catch]", e); }
         const card = document.getElementById('aiMirrorCard');
         if (card) card.style.display = 'none';
         toast(`${BUCKETS[AI.mirrorBucket]?.l} limit updated to ${fmtF(AI.mirrorNewLimit)} ✓`);
@@ -9666,25 +9862,25 @@
       let m;
       while ((m = grandTotalRe.exec(fullText)) !== null) {
         const v = parseFloat(m[1].replace(/[₹,\s]/g, ''));
-        if (v > 0 && v < 9999999) amtCandidates.push({ v, priority: 10 });
+        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 10 });
       }
       while ((m = totalRe.exec(fullText)) !== null) {
         const v = parseFloat(m[1].replace(/[₹,\s]/g, ''));
-        if (v > 0 && v < 9999999) amtCandidates.push({ v, priority: 8 });
+        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 8 });
       }
 
       // Strategy 2: ₹ symbol directly followed by amount  e.g. "₹40.00" or "₹ 40.00"
       const rupeeRe = /₹\s*([0-9,]+(?:\.[0-9]{1,2})?)/g;
       while ((m = rupeeRe.exec(fullText)) !== null) {
         const v = parseFloat(m[1].replace(/,/g, ''));
-        if (v > 0 && v < 9999999) amtCandidates.push({ v, priority: 7 });
+        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 7 });
       }
 
       // Strategy 3: "Rs." / "INR" followed by amount
       const rsRe = /(?:rs\.?|inr)\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi;
       while ((m = rsRe.exec(fullText)) !== null) {
         const v = parseFloat(m[1].replace(/,/g, ''));
-        if (v > 0 && v < 9999999) amtCandidates.push({ v, priority: 6 });
+        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 6 });
       }
 
       // Strategy 4: Per-line scan — last standalone number on lines containing "total"
@@ -9693,7 +9889,7 @@
           const nums = line.match(/[0-9,]+(?:\.[0-9]{1,2})?/g);
           if (nums) {
             const last = parseFloat(nums[nums.length - 1].replace(/,/g, ''));
-            if (last > 0 && last < 9999999) amtCandidates.push({ v: last, priority: 5 });
+            if (last > 0 && last < MAX_AMT) amtCandidates.push({ v: last, priority: 5 });
           }
         }
       }
@@ -9703,7 +9899,7 @@
         const anyRe = /([0-9,]{2,}(?:\.[0-9]{1,2})?)/g;
         while ((m = anyRe.exec(fullText)) !== null) {
           const v = parseFloat(m[1].replace(/,/g, ''));
-          if (v >= 5 && v < 9999999) amtCandidates.push({ v, priority: 1 });
+          if (v >= 5 && v < MAX_AMT) amtCandidates.push({ v, priority: 1 });
         }
       }
 
@@ -9782,7 +9978,7 @@
     function getLateNightWarning() {
       const hour = new Date().getHours();
       if (hour < 6 || hour > 10) return null;
-      const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+      const yesterday = new Date(Date.now()-MS_PER_DAY).toISOString().slice(0,10);
       const lateNight = (D.transactions||[]).filter(t => {
         if (!t.date || t.date !== yesterday) return false;
         const h = t.time ? parseInt(t.time.split(':')[0]) : 12;
@@ -9865,21 +10061,115 @@
 
     // ── Week key helper ─────────────────────────────────────────────
     function _aiWeekKey() {
-      return 'w' + Math.floor(Date.now() / (7*86400000));
+      return 'w' + Math.floor(Date.now() / (WEEK_MS));
+    }
+
+    // ── FEATURE 1: PAYDAY MODE ────────────────────────────────────────
+    // Detects approximate payday from history, shows balance left this month
+    function _getPaydayInfo() {
+      const txns = D.transactions || [];
+      if (txns.length < 5) return null;
+      // Infer payday: find the day-of-month that appears most as a high-spend spike start
+      // Simpler heuristic: look at income sources for this month
+      const sd = SRC_DB.load();
+      const curMon = offsetMonthStr(0);
+      const curSrc = (sd.sources || []).filter(s => s.month === curMon);
+      const totalIncome = curSrc.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      if (totalIncome <= 0) return null;
+      const sm = summary();
+      const spent = sm.total || 0;
+      const left = totalIncome - spent;
+      const pct = Math.round((spent / totalIncome) * 100);
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const daysLeft = daysInMonth - now.getDate();
+      const dailyBudget = left > 0 && daysLeft > 0 ? Math.round(left / daysLeft) : 0;
+      return { totalIncome, spent, left, pct, daysLeft, dailyBudget };
+    }
+
+    // ── FEATURE 2: GUILT-FREE DAY STREAK ─────────────────────────────
+    // Counts consecutive days with zero spends
+    function _getGuiltFreeStreak() {
+      const txns = D.transactions || [];
+      if (txns.length === 0) return 0;
+      const now = new Date();
+      let streak = 0;
+      // Walk back from yesterday
+      for (let i = 1; i <= 30; i++) {
+        const d = new Date(now); d.setDate(d.getDate() - i);
+        const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        const hasSpend = txns.some(t => t.date === dateStr);
+        if (hasSpend) break;
+        streak++;
+      }
+      return streak;
+    }
+
+    // ── FEATURE 3: MERCHANT FREQUENCY ALERT ──────────────────────────
+    // Called from aiReaction — returns alert string or null
+    function _merchantFreqAlert(desc, transactions) {
+      if (!desc || desc.length < 2) return null;
+      const lower = desc.toLowerCase();
+      const weekAgo = Date.now() - WEEK_MS;
+      const recent = (transactions || []).filter(t =>
+        t.merchant && t.merchant.toLowerCase() === lower &&
+        new Date(t.timestamp).getTime() > weekAgo
+      );
+      const count = recent.length + 1; // +1 = current save
+      if (count >= 3) {
+        const ordinal = count === 3 ? '3rd' : count === 4 ? '4th' : count === 5 ? '5th' : `${count}th`;
+        return `${ico(desc)} ${ordinal} time at ${desc} this week 👀`;
+      }
+      return null;
+    }
+
+    // ── FEATURE 4: SMART AMOUNT SUGGEST ──────────────────────────────
+    // Returns last amount for a matched merchant, or null
+    function _getLastAmount(desc) {
+      if (!desc || desc.length < 2) return null;
+      const lower = desc.toLowerCase();
+      const txns = D.transactions || [];
+      for (const t of txns) {
+        if (t.merchant && t.merchant.toLowerCase() === lower && t.amount > 0) {
+          return t.amount;
+        }
+      }
+      return null;
+    }
+
+    // ── FEATURE 5: MONTH-END WARNING ─────────────────────────────────
+    // Returns array of buckets near/over limit in last week of month, or []
+    function _getMonthEndWarnings() {
+      const now = new Date();
+      const day = now.getDate();
+      if (day < 22) return []; // only last ~9 days of month
+      const sm = summary();
+      const lim = D.limits || {};
+      const warnings = [];
+      for (const [bk, cfg] of Object.entries(BUCKETS)) {
+        const spent = sm[bk] || 0;
+        const limit = lim[bk] || 0;
+        if (limit <= 0) continue;
+        const pct = spent / limit;
+        if (pct >= BUDGET_WARN_PCT && pct < 1) warnings.push({ bk, cfg, spent, limit, pct, over: false });
+        else if (pct >= 1) warnings.push({ bk, cfg, spent, limit, pct, over: true });
+      }
+      return warnings;
     }
 
     // ── INSTALL AI METHODS + HOOK r_home / r_add / r_month ──────────
     // BUG-7: rHist + rHistDebounced — called from HTML oninput but were never defined
     function rHist() { if (APP && APP.r_history) APP.r_history(); }
-    var _rHistTimer;
+    let _rHistTimer; // LW-02: let not var
     function rHistDebounced() {
       clearTimeout(_rHistTimer);
       _rHistTimer = setTimeout(rHist, 200);
     }
 
+    _guardAPP(APP);
     _installAIMethods();
     // Seed tag registry from existing transaction history (runs once)
-    try { migrateTagsToRegistry(); } catch(e) {}
+    try { migrateTagsToRegistry(); } catch(e) { console.warn("[catch]", e); }
 
     // Hook r_home to also render AI cards
     const _origRHome = APP.r_home.bind(APP);
@@ -9887,6 +10177,9 @@
       _origRHome();
       APP.aiRenderInsight();
       APP.aiRenderForecast();
+      APP.aiRenderPayday();
+      APP.aiRenderGuiltFree();
+      APP.aiRenderMonthEnd();
     };
 
     // Hook r_add to reset AI smart add input
@@ -9926,6 +10219,7 @@
     // Hook saveManual to also show AI reaction
     const _origSaveManual = APP.saveManual.bind(APP);
     APP.saveManual = function() {
+      _invalidateMerchantIndex(); // MQ-03
       if (S.saveBusy) return; // BUG-006: prevent double-save in AI hook
       const amtEl = document.getElementById('addAmt');
       const amt = parseINR((amtEl && amtEl.value) || '0');
@@ -9994,7 +10288,7 @@
       const tagRows = customTags.length === 0
         ? '<p style="color:var(--slate);font-size:14px;text-align:center;padding:20px 0">No custom tags yet.<br>Add tags while logging spends.</p>'
         : customTags.map(t => {
-            const daysAgo = Math.floor((Date.now() - (t.lastUsed || 0)) / 86400000);
+            const daysAgo = Math.floor((Date.now() - (t.lastUsed || 0)) / MS_PER_DAY);
             const lastUsedStr = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`;
             return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--fog)">
               <div>
