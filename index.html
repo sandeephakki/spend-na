@@ -5005,6 +5005,19 @@
   .tab[data-t="add"] { display: none; }
 
 
+    /* BUG-4: hero total scale badge */
+    .h-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255,255,255,.55);
+      background: rgba(255,255,255,.1);
+      border-radius: 8px;
+      padding: 2px 7px;
+      margin-left: 8px;
+      vertical-align: middle;
+      letter-spacing: .5px;
+    }
   </style>
 </head>
 
@@ -5452,9 +5465,9 @@
             <div class="amt-hero">
               <span class="amt-sym">₹</span>
               <input class="amt-in" id="addAmt" type="text" inputmode="decimal" placeholder="0"
-                oninput="APP.valAdd()"
+                oninput="_fmtAmtLive(this);APP.valAdd()"
                 onfocus="this.value=parseINR(this.value)||''"
-                onblur="if(this.value)this.value=fmtINR(parseINR(this.value))">
+                onblur="if(this.value)this.value=fmtINR(parseINR(this.value))">  <!-- BUG-3: live comma format -->
             </div>
             <div class="add-sec" style="margin-bottom:0">
               <span class="add-lbl">DATE</span>
@@ -6196,8 +6209,45 @@
     }
     function fmt(n) { if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`; if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`; return `₹${n}`; }
     function fmtF(n) { return '₹' + (isFinite(+n) ? +n : 0).toLocaleString('en-IN'); }
+    // BUG-4: hero display = full comma-formatted amount + scale badge
+    function fmtHero(n) {
+      const v = isFinite(+n) ? Math.abs(+n) : 0;
+      const formatted = '₹' + v.toLocaleString('en-IN');
+      let badge = '';
+      if (v >= 10000000)      badge = (v / 10000000).toFixed(2).replace(/\.?0+$/, '') + ' Cr';
+      else if (v >= 100000)   badge = (v / 100000).toFixed(2).replace(/\.?0+$/, '') + ' L';
+      else if (v >= 1000)     badge = (v / 1000).toFixed(1).replace(/\.?0+$/, '') + 'K';
+      return { formatted, badge };
+    }
     function fmtINR(n) { if (!n && n !== 0) return ''; return Number(n).toLocaleString('en-IN'); }
     function parseINR(s) { return parseFloat((String(s || '')).replace(/,/g, '')) || 0; }
+    // BUG-3: live Indian-format comma insertion as-you-type
+    function _fmtAmtLive(el) {
+      if (!el) return;
+      const raw = el.value.replace(/,/g, '');
+      // Skip: empty, just a dot, mid-decimal entry, leading zeros (e.g. "0.")
+      if (!raw || raw === '.' || raw.endsWith('.') || /^\./.test(raw)) return;
+      const num = Number(raw);
+      if (!isFinite(num) || num < 0) return;
+      // Don't format if user is typing a decimal part (e.g. "100.5" mid-type)
+      const dotIdx = raw.indexOf('.');
+      if (dotIdx !== -1 && raw.length - dotIdx <= 3) return;
+      const cursor = el.selectionStart;
+      const oldLen = el.value.length;
+      // Format integer part, preserve decimal part verbatim
+      let formatted;
+      if (dotIdx !== -1) {
+        const intPart = raw.slice(0, dotIdx);
+        const decPart = raw.slice(dotIdx); // includes the dot
+        formatted = Number(intPart).toLocaleString('en-IN') + decPart;
+      } else {
+        formatted = num.toLocaleString('en-IN');
+      }
+      if (formatted === el.value) return; // no change — avoid cursor jump
+      el.value = formatted;
+      const adj = el.value.length - oldLen;
+      try { el.setSelectionRange(Math.max(0, cursor + adj), Math.max(0, cursor + adj)); } catch(_) { /* intentionally silent */ }
+    }
     function avHTML(p, sz) {
       const s = sz || 44, lt = ((p && p.name && p.name[0]) || 'S').toUpperCase();
       if (p?.photo && String(p.photo).startsWith('data:image/')) return `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
@@ -6656,7 +6706,7 @@
         const msgs = [];
         const now = new Date();
         const daysLeft = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate();
-        const sm = summary();
+        const sm = summary(offsetMonthStr(0)); // BUG-1 scope
         const currentMonth = offsetMonthStr(0);
 
         // v5.0 AI: 3am Warning (highest priority if applicable)
@@ -7131,9 +7181,14 @@
       // ── HOME ──
       r_home() {
         this.refreshTop();
-        const sm = summary(), pend = pending(), lim = D.limits;
+        const _curMon = offsetMonthStr(0);
+        const sm = summary(_curMon), pend = pending(), lim = D.limits; // BUG-1: scoped to current month
         const _streakHTML = '';
-        document.getElementById('hHero').innerHTML = sm.total > 0 ? `<div class="h-total"><span class="h-tl">This Month</span><span class="h-tv">${fmtF(sm.total)}</span></div>` : '';
+        // BUG-4: show full amount + scale badge on hero
+        const _hero = fmtHero(sm.total);
+        document.getElementById('hHero').innerHTML = sm.total > 0
+          ? `<div class="h-total"><span class="h-tl">This Month</span><span class="h-tv">${_hero.formatted}${_hero.badge ? `<span class="h-badge">${_hero.badge}</span>` : ''}</span></div>`
+          : '';
         // insights tab - no badge needed
 
         // ── Sources indicator (plug-in: only shown if user has added sources this month) ──
@@ -7368,7 +7423,7 @@
       showSlice(bk) { S.sliceBk = bk; this.go('slice'); },
       r_slice() {
         const k = S.sliceBk, c = BUCKETS[k]; if (!c) { this.go('month'); return; }
-        const sm = summary(), total = sm.total, amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0;
+        const sm = summary(offsetMonthStr(0)), total = sm.tota // BUG-1l, amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0;
         const month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
         document.getElementById('sliceTitle').textContent = c.l;
         const refs = { luxury: { y: 'You treated yourself. Did it feel worth it?', n: 'Maybe next month will be lighter.' }, necessary: { y: 'Your essentials are covered. That\'s what matters.', n: 'Some months cost more. Life happens.' }, committed: { y: 'Obligations fully met. Real discipline.', n: 'A heavy month for commitments.' }, comfortable: { y: 'You lived well. Balance is a skill.', n: 'Small shifts add up. One swap next month.' } };
@@ -7625,8 +7680,9 @@
       },
 
       shareMonth() {
-        const sm = summary(), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-        const txns = (D.transactions || []).filter(t => t.bucket);
+        const _curMonShare = offsetMonthStr(0);
+        const sm = summary(_curMonShare), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); // BUG-1
+        const txns = (D.transactions || []).filter(t => t.bucket && t.month === _curMonShare); // BUG-1: current month only
         if (txns.length === 0) { toast('No sorted transactions to share yet'); return; }
         const total = sm.total;
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0, lim = D.limits[k] || 0, isOver = lim > 0 && amt > lim; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px;border:2px solid ${isOver ? '#ef4444' : c.cm}"><div style="font-size:10px;color:${c.c};font-weight:700;letter-spacing:1px">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${isOver ? '#ef4444' : c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px">${pct}%${lim > 0 ? ` of ₹${lim.toLocaleString('en-IN')} limit` : ''}</div>${isOver ? `<div style="font-size:10px;color:#ef4444;font-weight:700;margin-top:4px">⚠ OVER LIMIT</div>` : ''}</div>`; }).join('');
@@ -7896,7 +7952,7 @@
       exportHTML() {
         const txns = D.transactions || [];
         if (txns.length === 0) { toast('No transactions to export yet'); return; }
-        const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), sm = summary();
+        const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), sm = summary(offsetMonthStr(0)); // BUG-1
         const rows = txns.map(t => { const cfg = t.bucket ? BUCKETS[t.bucket] : null; return `<tr><td>${t.date}</td><td><strong>${t.merchant}</strong></td><td style="text-align:right;font-weight:700">₹${t.amount.toLocaleString('en-IN')}</td><td style="text-align:center"><span style="background:${cfg ? cfg.cl : '#f1f5f9'};color:${cfg ? cfg.c : '#94a3b8'};font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px">${cfg ? cfg.l : '—'}</span></td></tr>`; }).join('');
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px"><div style="font-size:10px;color:${c.c};font-weight:700">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:4px">${pct}%</div></div>`; }).join('');
         const html = _buildReportHtml({ eyebrow: 'HISTORY', title: month, amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} total records`, bCards, rows, txnCount: `All Transactions (${txns.length} total records)`, footerYear: '2026' });
@@ -7912,8 +7968,8 @@
       },
 
       shareMonth() {
-        const sm = summary(), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-        const txns = (D.transactions || []).filter(t => t.bucket);
+        const sm = summary(offsetMonthStr(0)), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); // BUG-1
+        const txns = (D.transactions || []).filter(t => t.bucket && t.month === offsetMonthStr(0)); // BUG-1
         if (txns.length === 0) { toast('No sorted transactions to share yet'); return; }
         const total = sm.total;
         const text = [`📊 My Month — ${month}`, `Total: ${fmtF(total)}`, '',
@@ -8002,7 +8058,7 @@
 
       // ── LIMITS ──
       r_limits() {
-        S.limVals = { ...D.limits }; const sm = summary();
+        S.limVals = { ...D.limits }; const sm = summary(offsetMonthStr(0)); // BUG-1: scoped
         document.getElementById('limBody').innerHTML = Object.entries(BUCKETS).map(([k, c]) => {
           const amt = sm[k] || 0, lim = S.limVals[k] || 0, isOver = lim > 0 && amt > lim, isNear = lim > 0 && amt >= lim * .8 && !isOver, pct = lim > 0 ? Math.min((amt / lim) * 100, 100) : 0, col = isOver ? 'var(--err)' : isNear ? 'var(--warn)' : c.c;
           return `<div class="lim-card" style="border-left-color:${c.c}">
@@ -8012,7 +8068,7 @@
           ${isOver ? `<span class="lc-st" style="color:var(--err)">OVER</span>` : ''}
           ${isNear ? `<span class="lc-st" style="color:var(--warn)">NEAR</span>` : ''}
         </div>
-        <div class="lc-row"><span class="lc-sym">₹</span><input class="lc-in" id="lv_${k}" type="text" inputmode="decimal" value="${lim > 0 ? fmtINR(lim) : ''}" placeholder="0" style="color:${col};border-color:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : 'var(--fog)'}" oninput="S.limVals['${k}']=Math.max(0,parseINR(this.value)||0)" onfocus="this.value=parseINR(this.value)||''" onblur="if(this.value)this.value=fmtINR(parseINR(this.value))"></div>
+        <div class="lc-row"><span class="lc-sym">₹</span><input class="lc-in" id="lv_${k}" type="text" inputmode="decimal" value="${lim > 0 ? fmtINR(lim) : ''}" placeholder="0" style="color:${col};border-color:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : 'var(--fog)'}" oninput="_fmtAmtLive(this);S.limVals['${k}']=Math.max(0,parseINR(this.value)||0)" onfocus="this.value=parseINR(this.value)||''" onblur="if(this.value)this.value=fmtINR(parseINR(this.value))"></div>
         ${lim > 0 ? `<div class="lc-bar" style="background:${c.cl}"><div class="lc-bfill" style="background:${col};width:${pct}%"></div></div><div class="lc-bt">₹${amt.toLocaleString('en-IN')} of ₹${lim.toLocaleString('en-IN')} (${Math.round(pct)}%)</div>` : `<div style="font-size:11px;color:var(--mist);margin-top:6px">Type your monthly budget above and tap Save ›</div>`}
       </div>`;
         }).join('') + `<button onclick="APP.resetLimits()" style="width:100%;background:var(--paper);border:1.5px solid var(--fog);border-radius:var(--r);padding:14px;font-size:13px;color:var(--slate);font-weight:600;cursor:pointer;margin-top:4px">Reset to defaults</button>`;
@@ -8426,25 +8482,49 @@
       },
 
       renderAddTagChips() {
-        const el = document.getElementById('addTagChips');
-        if (!el) return;
-        const allChips = getDynamicTagList().concat(
-          _addTags.filter(t => !getDynamicTagList().includes(t))
-        );
-        el.innerHTML = allChips.map(tag => {
-          const on = _addTags.includes(tag);
+        const chipsEl = document.getElementById('addTagChips');
+        const pillsEl = document.getElementById('addTagSelected');
+        if (!chipsEl) return;
+        // BUG-2: snapshot list once — avoids repeated pruneOldTags() calls per render
+        const baseList = getDynamicTagList();
+        const allTags = baseList.concat(_addTags.filter(t => !baseList.includes(t)));
+        const activeSet = new Set(_addTags);
+        // Single DOM write for chips
+        chipsEl.innerHTML = allTags.map(tag => {
+          const on = activeSet.has(tag);
           const isCustom = !PRESET_TAGS.includes(tag);
-          return `<div onclick="APP.toggleAddTag('${esc(tag)}')" style="flex-shrink:0;padding:6px 11px;border-radius:16px;border:1.5px solid ${on ? 'var(--teal)' : (isCustom ? 'var(--teal)' : 'var(--fog)')};background:${on ? 'var(--tealL)' : 'var(--card)'};font-size:11px;font-weight:600;color:${on ? 'var(--tealD)' : (isCustom ? 'var(--teal)' : 'var(--slate)')};cursor:pointer;white-space:nowrap;transition:all .12s">#${esc(tag)}</div>`;
+          const border = on ? 'var(--teal)' : (isCustom ? 'var(--teal)' : 'var(--fog))');
+          const bg = on ? 'var(--tealL)' : 'var(--card)';
+          const color = on ? 'var(--tealD)' : (isCustom ? 'var(--teal)' : 'var(--slate)');
+          return `<div data-tag="${esc(tag)}" style="flex-shrink:0;padding:6px 11px;border-radius:16px;border:1.5px solid ${border};background:${bg};font-size:11px;font-weight:600;color:${color};cursor:pointer;white-space:nowrap;transition:background .1s,border-color .1s">#${esc(tag)}</div>`;
         }).join('');
-        this._renderSelectedTags();
+        // Attach single delegated listener (BUG-2: no per-chip listeners, no stacking)
+        chipsEl._tagHandler && chipsEl.removeEventListener('click', chipsEl._tagHandler);
+        chipsEl._tagHandler = (e) => {
+          const el = e.target.closest('[data-tag]');
+          if (!el) return;
+          APP.toggleAddTag(el.dataset.tag);
+        };
+        chipsEl.addEventListener('click', chipsEl._tagHandler);
+        // Single DOM write for selected pills
+        if (pillsEl) {
+          pillsEl.innerHTML = _addTags.length === 0 ? '' :
+            _addTags.map(tag => `<span class="tag-pill">#${esc(tag)}<button class="tag-pill-rm" data-tag="${esc(tag)}">✕</button></span>`).join('');
+          pillsEl._pillHandler && pillsEl.removeEventListener('click', pillsEl._pillHandler);
+          pillsEl._pillHandler = (e) => {
+            const btn = e.target.closest('.tag-pill-rm');
+            if (!btn) return;
+            APP.toggleAddTag(btn.dataset.tag);
+          };
+          pillsEl.addEventListener('click', pillsEl._pillHandler);
+        }
       },
 
       toggleAddTag(tag) {
-        if (_addTags.includes(tag)) {
-          _addTags = _addTags.filter(t => t !== tag);
-        } else {
-          _addTags.push(tag);
-        }
+        if (!tag) return;
+        // BUG-2: direct array mutation then single re-render — no intermediate state
+        const idx = _addTags.indexOf(tag);
+        if (idx !== -1) { _addTags.splice(idx, 1); } else { _addTags.push(tag); }
         this.renderAddTagChips();
       },
 
@@ -10076,7 +10156,7 @@
       const curSrc = (sd.sources || []).filter(s => s.month === curMon);
       const totalIncome = curSrc.reduce((s, x) => s + (Number(x.amount) || 0), 0);
       if (totalIncome <= 0) return null;
-      const sm = summary();
+      const sm = summary(curMon); // BUG-1: scope to current month
       const spent = sm.total || 0;
       const left = totalIncome - spent;
       const pct = Math.round((spent / totalIncome) * 100);
@@ -10143,7 +10223,7 @@
       const now = new Date();
       const day = now.getDate();
       if (day < 22) return []; // only last ~9 days of month
-      const sm = summary();
+      const sm = summary(offsetMonthStr(0)); // BUG-1
       const lim = D.limits || {};
       const warnings = [];
       for (const [bk, cfg] of Object.entries(BUCKETS)) {
