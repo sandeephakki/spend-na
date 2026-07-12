@@ -12,11 +12,12 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v5.4
-  FILE:           index.html — single-file PWA, no build step
+  VERSION:        v5.5
+  FILE:           index.html — single-file PWA (companion files: sw.js, manifest.json, icon-192.png, icon-512.png, .nojekyll — see constraint note below)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
   SW_CACHE:       sn-v5
+  APP_VER (SW):   5.5 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -24,7 +25,12 @@
 2. HARD CONSTRAINTS
    Violation of any breaks real users. No exceptions.
 
-  SINGLE_FILE       No external .js .css — everything inline
+  SINGLE_FILE       No external .js .css for APP LOGIC — everything inline.
+                    EXCEPTION (v5.5): sw.js is a real same-origin file — data:/blob:
+                    SW registration is opaque-origin and fails per spec (NEW-001).
+                    manifest.json + icon-192.png + icon-512.png are also required,
+                    standard, non-executable PWA companion files — GitHub Pages repo
+                    root, not app logic. Do not fold these back into index.html.
   OFFLINE_FIRST     Core app never requires network after first load
   NO_API_KEYS       No external AI calls — rule-based or on-device only
   NO_BUILD          No webpack / vite / npm / node
@@ -215,7 +221,7 @@
   AI_CONFIG_DEFAULT (all true):
     insight · forecast · streak · voice · reactions · mood
     duplicate · whyBuyThis · smartSearch · story · mirror
-    spendTwin · weeklyDigest · budgetSuggest
+    spendTwin · weeklyDigest · budgetSuggest · merchantNorm
     paydayMode · guiltFree · monthEndWarn
 
 ════════════════════════════════════════════════════════════════
@@ -225,7 +231,8 @@
 
   selSrc        inline styles not CSS class — changes must be in JS not CSS
   tags          may be absent on v1 records — always t.tags || []
-  SW            must use data: URI not blob: — Firefox blocks blob: SW
+  SW            must be served as real /sw.js — data: and blob: URIs are opaque-origin
+                and fail registration per spec on modern Chrome/Firefox (v5.5, NEW-001)
   bkt-nm        needs white-space:normal — text truncates on mobile without it
   _streakHTML   must be defined before r_home() references it
   migrateData   must be called in BOTH DB.load() and importFile()
@@ -265,6 +272,16 @@
   _txnDelete    canonical txn remove — never mutate D.transactions.filter inline
   _commitSave   use instead of DB.save(D)+markUnsaved()+toast() combos
   _merchantIndex invalidate after every _commitSave that adds/edits transactions
+  modal()       body param is raw innerHTML, NOT auto-escaped — never call modal() directly
+                with user-derived text; use safeModal() for static/pre-sanitised HTML and
+                userModal() for merchant names/tags/notes/any user-entered string (v5.5, BUG-003 final)
+  merchantNorm  compares lowercase-trimmed merchant names; ignores matches with < 3 prior
+                uses and exact (distance 0) matches — see _suggestMerchantName() (v5.5, MN-01)
+  DEBUG/log()   console.log calls go through log(), gated on const DEBUG=false — flip to
+                true for verbose dev logging; console.warn/error left as-is for real errors (v5.5, NEW-003)
+  generateSpendTwin / generateBudgetSuggestion / getWeeklyDigest
+                these existed in v5.4 but were never called from any render — now wired
+                into r_insights() / r_limits() / r_home() respectively (v5.5)
 
 ════════════════════════════════════════════════════════════════
 
@@ -5000,6 +5017,11 @@
   .creep-body {
     font-size: 12px; color: #9a3412; line-height: 1.5;
   }
+  /* BS-01: Smart Budget Suggestion card (Limits screen) */
+  .budget-suggest-card {
+    background: #f0fdf4; border: 1px solid #86efac;
+    border-radius: 14px; padding: 14px 16px; margin: 4px 0 10px;
+  }
 
   /* ── REDESIGN v5.0: Tab bar .tab-add-slot hidden ── */
   .tab[data-t="add"] { display: none; }
@@ -5479,7 +5501,8 @@
             <div class="add-sec">
               <span class="add-lbl">WHAT WAS IT FOR?</span>
               <input class="add-in" id="addDesc" type="text" inputmode="text"
-                placeholder="e.g. Lunch, Petrol, School fees" maxlength="100">
+                placeholder="e.g. Lunch, Petrol, School fees" maxlength="100"
+                onblur="APP.checkMerchantNorm(this)">
             </div>
             <div class="add-sec" style="margin-top:18px">
               <span class="add-lbl">WHICH BUCKET?</span>
@@ -5791,6 +5814,7 @@
       story: true, mirror: true, spendTwin: true,
       weeklyDigest: true, budgetSuggest: true,
       paydayMode: true, guiltFree: true, monthEndWarn: true,
+      merchantNorm: true, // MN-01
     };
     function getAIConfig() {
       try {
@@ -6165,6 +6189,8 @@
     // ── HELPERS ───────────────────────────────────────────────────
     function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;'); }
     function hashPw(raw) { return md5((raw || '').trim()); } // CR-02: single canonical password hasher — never call md5() directly
+    const DEBUG = false; // NEW-003: flip to true for verbose dev logging
+    function log() { if (DEBUG) console.log.apply(console, arguments); } // NEW-003
     function _safeGet(key, fallback) { if (!key) return fallback; try { const r = localStorage.getItem(key); if (!r) return fallback; const p = JSON.parse(r); return (p !== null && p !== undefined) ? p : fallback; } catch(e) { console.warn('[_safeGet]', key, e); return fallback; } } // CR-03
     function normTxn(t) { if (!t || typeof t !== 'object') return { merchant:'Unknown', amount:0, bucket:null, source:null, tags:[], date:'', time:'', month:'' }; const amt = parseFloat(t.amount); return { ...t, merchant: (typeof t.merchant === 'string' && t.merchant.trim()) ? t.merchant.trim() : 'Unknown', amount: isFinite(amt) && amt >= 0 ? amt : 0, bucket: t.bucket || null, source: t.source || null, tags: Array.isArray(t.tags) ? t.tags : [], date: t.date || '', time: t.time || '', month: t.month || '' }; } // HR-02: hardened
     let _saveTimer; function debouncedSave(d, ms) { if (!d) return; ms = ms || 300; clearTimeout(_saveTimer); _saveTimer = setTimeout(function(){ try { DB.save(d); } catch(e) { console.error('[debouncedSave]', e); toast('⚠️ Save failed'); } }, ms); } // HR-04
@@ -6303,6 +6329,16 @@
       btns.forEach((b, i) => { document.getElementById('mb' + i).onclick = b.a; });
       document.getElementById('modal').classList.add('on');
     }
+    // P-03 / NEW-004: modal()'s body is not auto-escaped. Use these wrappers instead of
+    // calling modal() directly so every call site states its intent explicitly.
+    function safeModal(title, safeBodyHtml, btns) {
+      // safeBodyHtml must be a static string / trusted HTML — never raw user input
+      modal(title, safeBodyHtml, btns);
+    }
+    function userModal(title, userText, btns) {
+      // Wraps and escapes user-derived text (merchant names, amounts, tags, notes, etc.)
+      modal(title, `<p>${esc(userText)}</p>`, btns);
+    }
 
     // ── PAGE VISIBILITY ───────────────────────────────────────────
     const APP = {
@@ -6404,17 +6440,14 @@
           document.body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:32px;text-align:center;font-family:-apple-system,sans-serif;background:#f8fafc"><div style="font-size:48px;margin-bottom:16px">🔒</div><div style="font-size:20px;font-weight:800;color:#1e293b;margin-bottom:8px">Storage not available</div><div style="font-size:14px;color:#64748b;max-width:300px">Spend-na needs localStorage to work. Please disable Private/Incognito mode or check your browser settings.</div></div>`;
           return;
         }
-        // Service worker — data URI approach works on Chrome, Firefox, Safari
-        // (blob: URLs are blocked by Firefox per spec — BUG-005 fix)
+        // Service worker — served as a real same-origin /sw.js file.
+        // data: and blob: URIs are opaque-origin and fail SW registration per spec
+        // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
+        const APP_VER = '5.5';
         if ('serviceWorker' in navigator) {
           try {
-            // Cache name bumped to sn-v5 — old cache is auto-pruned on activate
-            // SW also responds to GET_VERSION via MessageChannel for stale detection
-            const SW_APP_VERSION = 'sn-v5';
-            const swCode = `const C='${SW_APP_VERSION}';const APP_VER='5.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.add('/').catch(()=>{})));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.status===200){const clone=res.clone();caches.open(C).then(c=>c.put(e.request,clone));}return res;}).catch(()=>r||new Response('Offline',{status:503}))));});self.addEventListener('message',e=>{if(e.data&&e.data.type==='GET_VERSION'){e.ports[0].postMessage({version:APP_VER,cache:C});}});self.addEventListener('push',e=>{const d=e.data?e.data.json():{title:'Spend-na',body:'Check your spends!'};e.waitUntil(self.registration.showNotification(d.title,{body:d.body,tag:'sn'}));});`;
-            const swDataUri = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(swCode);
-            navigator.serviceWorker.register(swDataUri).then(reg => {
-              console.log('SW registered:', reg.scope);
+            navigator.serviceWorker.register('/sw.js').then(reg => {
+              log('SW registered:', reg.scope);
               // Version check: ask the active SW what version it is
               // If a stale SW is still serving (old cache), show a reload nudge
               setTimeout(() => {
@@ -6424,7 +6457,7 @@
                   const mc = new MessageChannel();
                   mc.port1.onmessage = ev => {
                     const swVer = ev.data && ev.data.version;
-                    if (swVer && swVer !== '5.0') {
+                    if (swVer && swVer !== APP_VER) {
                       toast('🔄 App updated — tap to reload', 5000);
                       document.getElementById('toast').style.cursor = 'pointer';
                       document.getElementById('toast').onclick = () => window.location.reload();
@@ -6434,7 +6467,7 @@
                 } catch (e) { /* MessageChannel not available — skip */ }
               }, 3000);
             }).catch(err => {
-              console.log('SW registration skipped:', err.message);
+              log('SW registration skipped:', err.message);
             });
           } catch (e) { }
         }
@@ -7215,6 +7248,20 @@
 
         document.getElementById('hBody').innerHTML = `
       ${_streakHTML}
+      ${(() => { // WD-01: was defined but never wired into a render
+        try {
+          const dismissed = _safeGet('sn_weekly_digest_dismissed', '');
+          const wk = new Date().getFullYear() + '-W' + Math.ceil(new Date().getDate()/7);
+          if (dismissed === wk) return '';
+          const digest = getWeeklyDigest();
+          if (!digest) return '';
+          return `<button class="pend-btn" onclick="APP.go('history')" style="margin-bottom:8px;position:relative">
+            <div class="p-dot" style="background:var(--teal)"></div>
+            <div class="p-info"><div class="p-t">📊 Weekly digest</div><div class="p-s">${esc(digest)}</div></div>
+            <span onclick="event.stopPropagation();localStorage.setItem('sn_weekly_digest_dismissed','${wk}');APP.r_home();" style="padding:2px 6px;color:var(--mist);font-size:14px">✕</span>
+          </button>`;
+        } catch(e) { return ''; }
+      })()}
       ${pend > 0 ? `<button class="pend-btn" onclick="APP.go('add')"><div class="p-dot"></div><div class="p-info"><div class="p-t">${pend} spend${pend > 1 ? 's' : ''} waiting to sort</div><div class="p-s">Tap to classify into buckets</div></div><div class="p-arr">›</div></button>` : ''}
       <div class="sec-row"><span class="sec-lbl">THIS MONTH</span><button class="sec-lnk" onclick="APP.go('limits')">Limits ›</button></div>
       <div class="bgrid">
@@ -7672,6 +7719,55 @@
         } catch(e) { return ''; }
       })()}
 
+      <!-- SPEND TWIN (ST-01) — was defined but never wired into a render -->
+      ${(() => {
+        try {
+          const twin = generateSpendTwin(offsetMonthStr(0));
+          if (!twin) return '';
+          const delta = total - twin.total;
+          const pct = twin.total > 0 ? Math.round((delta / twin.total) * 100) : 0;
+          const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
+          const col = delta > 0 ? 'var(--err)' : delta < 0 ? 'var(--ok)' : 'var(--slate)';
+          return `<div class="ins-card">
+            <div class="ins-card-title">👫 SPEND TWIN — vs ${esc(twin.month)}</div>
+            <div style="font-size:12px;color:var(--slate);line-height:1.6">
+              That month had a similar spending shape (${twin.similarity}% match).
+              You spent <span style="font-weight:700;color:${col}">${arrow} ${Math.abs(pct)}%</span>
+              ${delta >= 0 ? 'more' : 'less'} this month — ${fmtF(total)} vs ${fmtF(twin.total)}.
+            </div>
+          </div>`;
+        } catch(e) { return ''; }
+      })()}
+
+      <!-- DAY-OF-WEEK SPEND (DOW-01) — new, passive display, no toggle -->
+      ${(() => {
+        try {
+          const dowTotals = [0,0,0,0,0,0,0];
+          txns.forEach(t => {
+            if (!t.date) return;
+            const d = new Date(t.date + 'T12:00:00');
+            if (isNaN(d)) return;
+            dowTotals[d.getDay()] += (Number(t.amount) || 0);
+          });
+          const maxDow = Math.max(...dowTotals, 1);
+          const dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          if (dowTotals.every(v => v === 0)) return '';
+          return `<div class="ins-card">
+            <div class="ins-card-title">📅 SPEND BY DAY OF WEEK</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+              ${dowNames.map((nm, i) => `<div style="display:flex;align-items:center;gap:8px">
+                <div style="width:30px;font-size:11px;color:var(--slate);flex-shrink:0">${nm}</div>
+                <div style="flex:1;background:var(--fog);border-radius:4px;overflow:hidden;height:10px">
+                  <div style="width:${Math.round((dowTotals[i]/maxDow)*100)}%;height:100%;background:var(--teal)"></div>
+                </div>
+                <div style="width:64px;font-size:11px;color:var(--ink);text-align:right;flex-shrink:0">${fmtF(dowTotals[i])}</div>
+              </div>`).join('')}
+            </div>
+            <div style="font-size:11px;color:var(--mist);margin-top:8px">Heavy days may reflect recurring bills or large one-time purchases.</div>
+          </div>`;
+        } catch(e) { return ''; }
+      })()}
+
       <!-- FOOTER NOTE -->
       <div style="text-align:center;padding:12px 0 4px">
         <div style="font-size:11px;color:var(--mist);line-height:1.8">Insights are based on your sorted transactions.<br>Sort more spends for sharper patterns.</div>
@@ -8031,6 +8127,27 @@
         if (amtEl && amt > 0 && amt > MAX_AMT) { amtEl.style.color = 'var(--err)'; }
         else if (amtEl) { amtEl.style.color = ''; }
       },
+      // ── MN-01: merchant name normalisation — fires on blur of "what was it for" ──
+      checkMerchantNorm(inputEl) {
+        if (!getAIConfig().merchantNorm) return;
+        const typed = (inputEl?.value || '').trim();
+        if (!typed) return;
+        try {
+          const suggestion = _suggestMerchantName(typed);
+          if (!suggestion) return;
+          userModal(`Did you mean "${suggestion}"?`,
+            `You typed "${typed}" — "${suggestion}" is a merchant you've used before.`,
+            [
+              { l: 'No, keep mine', c: 'mb-nil', a: () => this.cm() },
+              { l: `Yes, use "${suggestion}"`, c: 'mb-ok', a: () => {
+                  const el = document.getElementById('addDesc');
+                  if (el) el.value = suggestion;
+                  this.cm();
+                } },
+            ]);
+        } catch(e) { /* non-critical — skip suggestion on any error */ }
+      },
+
       saveManual() {
         if (S.saveBusy) return; // BUG-006: prevent double-save
         const amtEl = document.getElementById('addAmt');
@@ -8071,7 +8188,9 @@
         <div class="lc-row"><span class="lc-sym">₹</span><input class="lc-in" id="lv_${k}" type="text" inputmode="decimal" value="${lim > 0 ? fmtINR(lim) : ''}" placeholder="0" style="color:${col};border-color:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : 'var(--fog)'}" oninput="_fmtAmtLive(this);S.limVals['${k}']=Math.max(0,parseINR(this.value)||0)" onfocus="this.value=parseINR(this.value)||''" onblur="if(this.value)this.value=fmtINR(parseINR(this.value))"></div>
         ${lim > 0 ? `<div class="lc-bar" style="background:${c.cl}"><div class="lc-bfill" style="background:${col};width:${pct}%"></div></div><div class="lc-bt">₹${amt.toLocaleString('en-IN')} of ₹${lim.toLocaleString('en-IN')} (${Math.round(pct)}%)</div>` : `<div style="font-size:11px;color:var(--mist);margin-top:6px">Type your monthly budget above and tap Save ›</div>`}
       </div>`;
-        }).join('') + `<button onclick="APP.resetLimits()" style="width:100%;background:var(--paper);border:1.5px solid var(--fog);border-radius:var(--r);padding:14px;font-size:13px;color:var(--slate);font-weight:600;cursor:pointer;margin-top:4px">Reset to defaults</button>`;
+        }).join('')
+          + (() => { try { return generateBudgetSuggestion(); } catch(e) { return ''; } })() // BS-01: wired in — was defined but never rendered
+          + `<button onclick="APP.resetLimits()" style="width:100%;background:var(--paper);border:1.5px solid var(--fog);border-radius:var(--r);padding:14px;font-size:13px;color:var(--slate);font-weight:600;cursor:pointer;margin-top:4px">Reset to defaults</button>`;
       },
       setLimQuick(k, v) { S.limVals[k] = v; const el = document.getElementById('lv_' + k); if (el) el.value = fmtINR(v); this.r_limits(); },
       saveLimits() { Object.keys(S.limVals).forEach(k => { if (S.limVals[k] < 0) S.limVals[k] = 0; }); D.limits = { ...S.limVals }; DB.save(D); toast('Limits saved ✓'); this.go('home'); },
@@ -8240,6 +8359,7 @@
           ${row('reactions','AI Reactions','Smart toast after each save')}
           ${row('mood','Mood Tagging 😊','How did this spend feel?')}
           ${row('duplicate','Duplicate Detector ⚠️','Catch accidental double entries')}
+          ${row('merchantNorm','Merchant Name Cleanup','Suggest matching past merchant names')}
           <div class="ai-cfg-section">HISTORY</div>
           ${row('whyBuyThis','Why Did I Buy This? ✨','Pattern insight per transaction')}
           ${row('smartSearch','Smart Search 🔎','Food finds Swiggy, chai, lunch')}
@@ -8959,6 +9079,50 @@
       return _merchantIndex;
     }
     function _invalidateMerchantIndex() { _merchantIndex = null; }
+
+    // ── MN-01: MERCHANT NAME NORMALISATION ────────────────────────────
+    // Small Levenshtein distance — good enough for short merchant strings
+    function _levenshtein(a, b) {
+      a = a || ''; b = b || '';
+      if (a === b) return 0;
+      const m = a.length, n = b.length;
+      if (m === 0) return n;
+      if (n === 0) return m;
+      let prev = Array.from({ length: n + 1 }, (_, i) => i);
+      for (let i = 1; i <= m; i++) {
+        const cur = [i];
+        for (let j = 1; j <= n; j++) {
+          cur[j] = a[i - 1] === b[j - 1]
+            ? prev[j - 1]
+            : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+        }
+        prev = cur;
+      }
+      return prev[n];
+    }
+    // Suggest a canonical merchant name for a freshly-typed one.
+    // Ignores exact matches (distance 0) and merchants with < 3 uses (merchantNorm gotcha).
+    function _suggestMerchantName(typed) {
+      const t = (typed || '').trim();
+      if (t.length < 3) return null;
+      const tLower = t.toLowerCase();
+      const counts = {};
+      (D.transactions || []).forEach(x => {
+        const m = (x.merchant || '').trim();
+        if (!m) return;
+        const k = m.toLowerCase();
+        counts[k] = counts[k] || { name: m, count: 0 };
+        counts[k].count++;
+      });
+      let best = null, bestDist = Infinity;
+      Object.keys(counts).forEach(k => {
+        if (k === tLower) return; // exact match — nothing to suggest
+        if (counts[k].count < 3) return; // not established enough to trust
+        const dist = _levenshtein(tLower, k);
+        if (dist > 0 && dist <= 2 && dist < bestDist) { bestDist = dist; best = counts[k].name; }
+      });
+      return best;
+    }
 
     function _findHistoryMerchant(desc) {
       if (!desc || !D || !D.transactions || D.transactions.length === 0) return null;
@@ -9885,7 +10049,7 @@
         const t = (D.transactions||[]).find(x=>x.id===id);
         if (!t) return;
         const obs = _generateWhyObservation(t);
-        modal('✨ Pattern insight', obs, [{ l: 'Got it', c: 'mb-ok', a: () => this.cm() }]);
+        userModal('✨ Pattern insight', obs, [{ l: 'Got it', c: 'mb-ok', a: () => this.cm() }]);
       };
 
       // ── applyBudgetSuggestion ─────────────────────────────────
@@ -10380,7 +10544,7 @@
             </div>`;
           }).join('');
 
-      modal('🏷 My Custom Tags',
+      safeModal('🏷 My Custom Tags',
         `<div style="margin-bottom:12px;font-size:13px;color:var(--slate)">Custom tags are remembered for ${TAG_PRUNE_DAYS} days after last use.</div>` + tagRows,
         [{ l: 'Done', c: 'mb-ok', a: () => this.cm() }]
       );
