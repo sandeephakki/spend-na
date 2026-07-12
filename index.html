@@ -282,6 +282,11 @@
   generateSpendTwin / generateBudgetSuggestion / getWeeklyDigest
                 these existed in v5.4 but were never called from any render — now wired
                 into r_insights() / r_limits() / r_home() respectively (v5.5)
+  rotate-guard  only 3 width breakpoints exist (767/768/1200) — a phone in landscape
+                crosses 767px and would get the desktop card layout by accident. Guarded
+                with (orientation:landscape)+(max-height:500px)+(pointer:coarse) so it
+                only fires for actual phones, never a resized mouse-driven desktop window
+                or a tablet in landscape (v5.5) — see README "mobile orientation" section
 
 ════════════════════════════════════════════════════════════════
 
@@ -540,6 +545,29 @@
         width: 440px;
         height: 880px;
       }
+    }
+
+    /* ── ROTATE GUARD — v5.5 ──────────────────────────────────────
+       Phones in landscape cross the 768px breakpoint above and would
+       otherwise get the desktop "phone-card" treatment letterboxed in
+       the middle of the screen. Block that specific case only: narrow
+       AND landscape AND coarse pointer (touch) — never fires for an
+       actual desktop/laptop window, which is mouse-driven (fine pointer)
+       even if resized short and wide. Tablets keep the card layout;
+       phone-height landscape (max-height) is the target. */
+    .rotate-guard { display: none; }
+    @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+      #app { display: none; }
+      .rotate-guard {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        position: fixed; inset: 0; z-index: 9999;
+        background: linear-gradient(160deg, #0d1117 0%, #111827 30%, #0f2340 60%, #0a1628 100%);
+        color: #fff; text-align: center; padding: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+      }
+      .rotate-guard-ic { font-size: 48px; margin-bottom: 16px; transform: rotate(90deg); }
+      .rotate-guard-t { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+      .rotate-guard-s { font-size: 13px; color: rgba(255,255,255,.6); }
     }
 
     /* ═══════════════════════════════════════════════════
@@ -5044,6 +5072,13 @@
 </head>
 
 <body>
+
+  <!-- ROTATE PROMPT — phones only, landscape only (see .rotate-guard CSS) -->
+  <div class="rotate-guard">
+    <div class="rotate-guard-ic">📱</div>
+    <div class="rotate-guard-t">Please rotate your device</div>
+    <div class="rotate-guard-s">Spend-na is designed for portrait use</div>
+  </div>
 
   <div id="app">
     <div class="orb3"></div>
