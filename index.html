@@ -287,6 +287,12 @@
                 with (orientation:landscape)+(max-height:500px)+(pointer:coarse) so it
                 only fires for actual phones, never a resized mouse-driven desktop window
                 or a tablet in landscape (v5.5) — see README "mobile orientation" section
+  #app sizing   width and max-height must be capped TOGETHER (max-width derived from the
+                same 95vh via the card's own aspect ratio) — capping height alone squashes
+                the phone-shaped card into a near-square one on any short/wide viewport.
+                Applies to BOTH the 768px and 1200px breakpoints — the 1200px tier had no
+                height cap at all until v5.5, so a short-but-wide window forced it to a
+                fixed 880px tall regardless of what actually fit on screen
 
 ════════════════════════════════════════════════════════════════
 
@@ -520,7 +526,14 @@
       }
     }
 
-    /* ── TABLET + DESKTOP: proper app layout ── */
+    /* ── TABLET + DESKTOP: proper app layout ──
+       v5.5 fix: width was fixed at 420px while only height was capped to
+       95vh — on a short/wide viewport (landscape window, short laptop
+       screen) that squashed the phone-shaped card into a near-square one
+       instead of shrinking it proportionally. max-width is now derived
+       from the same 95vh cap using the card's own aspect ratio (420:820),
+       so both dimensions shrink together and the phone shape is preserved
+       at any window size. */
     @media (min-width: 768px) {
       body {
         background: linear-gradient(135deg, #060a0f 0%, #0d1a2e 50%, #060a0f 100%);
@@ -534,6 +547,7 @@
         width: 420px;
         height: 820px;
         max-height: 95vh;
+        max-width: calc(95vh * 420 / 820); /* keep 420:820 aspect ratio when height-constrained */
         border-radius: 28px;
         box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.08);
         overflow: hidden;
@@ -544,6 +558,10 @@
       #app {
         width: 440px;
         height: 880px;
+        max-height: 95vh; /* v5.5 fix: this breakpoint had no height cap at all —
+                              on a short-but-wide window the card was forced to
+                              880px tall regardless of what actually fit on screen */
+        max-width: calc(95vh * 440 / 880); /* keep 440:880 aspect ratio when height-constrained */
       }
     }
 

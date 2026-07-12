@@ -135,6 +135,13 @@ possible follow-up.
 - `console.log` calls now gated behind a `DEBUG` flag (off by default).
 - Rotate-guard overlay: phones in landscape now see a "please rotate" screen
   instead of the letterboxed desktop card layout (tablets/desktop unaffected).
+- **Squashed-card bug fixed.** The desktop/tablet card capped *height* to
+  `95vh` but kept *width* fixed — on a short/wide viewport (landscape window,
+  short laptop screen) that squashed the phone-shaped card into a near-square
+  one, clipping content and overlapping the tip banner/tab bar. `max-width` is
+  now derived from the same `95vh` using the card's own aspect ratio, so both
+  dimensions shrink together. The 1200px breakpoint also had **no height cap
+  at all** — fixed too.
 
 See the PIB comment block at the top of `index.html` (sections 1–10) for the
 full versioned history and gotcha list — it's the single source of truth for
