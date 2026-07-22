@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.0
+  VERSION:        v6.2
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -21,8 +21,8 @@
                   js/* and break offline support for the rest of the app)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
-  SW_CACHE:       sn-v10
-  APP_VER (SW):   6.0 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
+  SW_CACHE:       sn-v12
+  APP_VER (SW):   6.2 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -324,6 +324,44 @@
                 bootstrap script always sets the attribute except in the pre-existing
                 storage-blocked edge case, which now falls back to dark instead of light
                 (documented inline where it's caught).
+                v6.1: superseded the v5.7 approach for SURFACES specifically. Flipping
+                --ink-rgb alone kept --paper/--card/--glass-bg/--glass-border translucent
+                — correct on a dark base (frosted glass) but washed-out/low-contrast on a
+                light one. v6.1 makes those 5 tokens solid opaque colors in
+                [data-theme="light"] instead (--card:#fff, --paper:#f3f4f6, --fog and
+                --glass-border:#e3e6eb) — a flat classic-UI look, no see-through panels.
+                Also: (a) blanket `[data-theme="light"] * { backdrop-filter:none
+                !important }` — kills all 62 backdrop-filter declarations at once,
+                including the ~30 hardcoded blur(...) ones that don't route through
+                --glass-blur and so couldn't be reached by a variable override alone;
+                (b) --glass-shimmer set to `none` (the glossy diagonal shine is a
+                glass-specific effect); (c) body/#app/#pgSplash/#pgTrust/letterbox-body
+                gradients flattened to single solid colors instead of 3-4-stop gradients;
+                (d) the 3 ambient orbs (#app::before/::after/.orb3) are display:none
+                entirely in light mode now, not just dimmed; (e) --sh/--shM/the #app
+                card's box-shadow all lightened — the originals (rgba(0,0,0,.3/.4/.7))
+                were tuned for a dark card and read as heavy/harsh on white. Text tokens
+                (--ink/--slate/--mist/--ghost) still derive from --ink-rgb as before —
+                that part of v5.7 was correct, only the SURFACE tokens changed.
+                v6.2: v6.1's audit found every hardcoded dark rgba() used as a component
+                BACKGROUND — but only searched for colors matching the specific navy hex
+                values used in body/#app/#pgSplash/#pgTrust. #tabBar, #smartBanner, and
+                .m-box (modal sheet) each had their OWN separately-hardcoded dark rgba
+                (10,18,32 / 12,20,40 respectively) that didn't match that search and so
+                weren't caught — they stayed solid dark in light mode even after v6.1
+                (this is what the user's screenshot showed: bottom nav + tip banner still
+                dark). Also had hardcoded light-only text colors (#e2e8f0, #7dd3fc,
+                #334155) on #smartBanner's children that would've been unreadable once
+                the banner background went white. All now have explicit
+                [data-theme="light"] overrides. Two DELIBERATELY left dark in both
+                themes, on purpose, not bugs: #modal's scrim (the dimming overlay behind
+                a modal — standard UX, every theme dims with dark) and #toast (common
+                "snackbar" convention to stay dark regardless of app theme). Also noted
+                but NOT touched: .mm-hero/.mm-tc (Month screen hero card) use `background:
+                var(--ink)` as an intentional "always-inverted" highlight card — this
+                predates the theme system entirely (same code before v5.7 existed) and
+                its internal text-contrast math is a separate, older issue, not something
+                introduced by the theme work — flagged to the user, not fixed here.
   env-config    v5.8: env-config.js detects local/QA/prod from location.hostname and
                 sets window.ENV = {name, label, debug, basePath, swPath, isProd}. MUST
                 load before app.js (it's first in <head>, before the theme bootstrap).

@@ -57,20 +57,34 @@
     }
 
     /* ═══════════════════════════════════════════════════
-   LIGHT THEME — v5.7
+   LIGHT THEME — v6.1 (classic/flat, replaces the v5.7 "same glass, lighter
+   ink" attempt)
    Toggled via [data-theme="light"] on <html> (see APP.initTheme() /
    APP.cycleTheme() in app.js, and the anti-flash inline snippet in
    index.html <head> that sets the attribute before first paint).
-   Warm off-white surface + soft charcoal ink instead of stark
-   white-on-white — the "soothing, less eye-pricking" ask, not a harsh
-   pure-white swap. Deepened accent shades (600-ish instead of 400-ish)
-   keep text/icon contrast readable on a light surface — the original
-   bright shades stay reserved for glows/badges/shadows, which read fine
-   on either surface and were left alone.
-═══════════════════════════════════════════════════ */
+
+   v5.7 only flipped --ink-rgb, which recolors TEXT correctly but left
+   --paper/--card/--glass-bg/--glass-border as translucent ink-tinted
+   overlays — on a dark base that's a frosted glass card; on a light base
+   the same translucency just looks washed-out and low-contrast, and the
+   backdrop-filter blur (62 declarations, many hardcoded rather than
+   var()-based) keeps the "glassy" look going underneath. v6.1 makes every
+   surface token a SOLID, OPAQUE color instead — a classic flat-card UI,
+   no see-through panels, no blur anywhere. Text tokens (--ink/--slate/
+   --mist/--ghost) stay derived from --ink-rgb, since opacity-graded TEXT
+   is normal typographic hierarchy, not glass — only the surface tokens
+   below are overridden to solid values. */
     [data-theme="light"] {
       color-scheme: light;
       --ink-rgb: 15,23,42; /* slate-900 — soft charcoal, not pure black */
+      --paper:        #f3f4f6; /* solid — was rgba(var(--ink-rgb),.06) */
+      --card:         #ffffff; /* solid — was rgba(var(--ink-rgb),.10) */
+      --fog:          #e3e6eb; /* solid — was rgba(var(--ink-rgb),.18); also used as a border color, still works solid */
+      --glass-bg:     #ffffff; /* solid — was rgba(var(--ink-rgb),.10) */
+      --glass-border: #e3e6eb; /* solid — was rgba(var(--ink-rgb),.16) */
+      --glass-shimmer: none;   /* the glossy diagonal shine — a glass-specific effect, removed entirely */
+      --sh:  0 1px 3px rgba(15,23,42,.10);  /* was rgba(0,0,0,.30) — tuned for a dark glass card, too heavy on flat white */
+      --shM: 0 4px 16px rgba(15,23,42,.12); /* was rgba(0,0,0,.40) */
       --teal:  #0284c7;
       --tealD: #075985;
       --tealM: #0369a1;
@@ -81,6 +95,14 @@
       --ok:    #059669;
       --warn:  #b45309;
       --err:   #dc2626;
+    }
+    /* Kills the ~30 hardcoded backdrop-filter:blur(...) declarations that
+       don't go through --glass-blur (that var alone can't reach them).
+       Blanket + !important is deliberate: the goal is NO blur anywhere in
+       light mode, not a case-by-case audit of 62 call sites. */
+    [data-theme="light"] * {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
     }
 
 
@@ -112,9 +134,10 @@
       -webkit-tap-highlight-color: transparent;
     }
     [data-theme="light"] body {
-      /* v5.7: warm ivory → soft blue-gray drift, mirroring the dark version's
-         navy-to-blue movement but inverted to light — not a flat white */
-      background: linear-gradient(145deg, #f7f5f1 0%, #eef1f6 35%, #eaf1f8 65%, #f7f5f1 100%);
+      /* v6.1: was a 4-stop gradient (v5.7) — flattened to one solid color.
+         A gradient plus solid opaque cards on top still reads as "layered/
+         designed" rather than "plain classic"; one flat tone is calmer. */
+      background: #eef1f6;
     }
 
     button {
@@ -158,7 +181,8 @@
       overflow: hidden;
     }
     [data-theme="light"] #app {
-      background: linear-gradient(160deg, #f7f5f1 0%, #eef1f6 30%, #eaf1f8 60%, #f2f4f8 100%);
+      /* v6.1: was a 4-stop gradient (v5.7) — flat, matches body */
+      background: #eef1f6;
     }
 
     /* Ambient colour orbs — the magic behind the frosted glass */
@@ -189,11 +213,14 @@
       top: 45%; right: -30px;
       pointer-events: none; z-index: 0;
     }
-    /* v5.7: same orbs, lower opacity — full-strength versions read as
-       neon glow on a dark base but as murky smudges on a light one */
-    [data-theme="light"] #app::before { background: radial-gradient(circle, rgba(14,165,233,.14) 0%, transparent 70%); }
-    [data-theme="light"] #app::after  { background: radial-gradient(circle, rgba(99,102,241,.10) 0%, transparent 70%); }
-    [data-theme="light"] #app .orb3   { background: radial-gradient(circle, rgba(52,211,153,.08) 0%, transparent 70%); }
+    /* v6.1: orbs are a glow/glass decorative device — removed entirely in
+       light mode rather than just dimmed (v5.7 tried dimming; still read as
+       "glassy ambiance" against a now-flat, opaque-card background). */
+    [data-theme="light"] #app::before,
+    [data-theme="light"] #app::after,
+    [data-theme="light"] #app .orb3 {
+      display: none;
+    }
 
     /* ── MOBILE (default): single column, fills the real screen ──
        v5.6: added `and (orientation: portrait)`. This is the ONE shape
@@ -236,9 +263,9 @@
         justify-content: center;
       }
       [data-theme="light"] body {
-        /* soft neutral surround, a touch deeper than the card itself so
-           the card still reads as a distinct surface floating on top */
-        background: linear-gradient(135deg, #e3e8ee 0%, #eef2f7 50%, #e3e8ee 100%);
+        /* v6.1: flat, a touch deeper than the card's own #eef1f6 so the
+           card still reads as a distinct surface */
+        background: #e3e8ee;
       }
 
       #app {
@@ -255,6 +282,14 @@
         border-radius: 28px;
         box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(var(--ink-rgb),.08);
         overflow: hidden;
+      }
+    }
+
+    @media (min-width: 768px), (orientation: landscape) {
+      [data-theme="light"] #app {
+        /* v6.1: was rgba(0,0,0,.7) — a shadow tuned for a dark card floating
+           on a dark background; far too heavy under a flat light card */
+        box-shadow: 0 20px 60px rgba(15,23,42,.18), 0 0 0 1px rgba(15,23,42,.06);
       }
     }
 
@@ -305,7 +340,7 @@
       gap: 16px;
     }
     [data-theme="light"] #pgSplash {
-      background: linear-gradient(160deg, #f7f5f1 0%, #eef1f6 40%, #eaf1f8 100%);
+      background: #eef1f6;
     }
 
     .sp-logo-wrap {
@@ -1146,6 +1181,14 @@
       flex-shrink: 0;
       position: relative;
       z-index: 10;
+    }
+    [data-theme="light"] #tabBar {
+      /* v6.2: this was a hardcoded rgba(10,18,32,X) — a fixed dark navy that
+         never routed through --ink-rgb at all, so v6.1's token flip couldn't
+         reach it. Same bug as #smartBanner and .m-box below (search this
+         file for other "v6.2" comments for the rest). */
+      background: #ffffff;
+      border-top: 1px solid #e3e6eb;
     }
     /* glowing top line on tab bar */
     #tabBar::before {
@@ -2995,6 +3038,11 @@
       overflow-y: auto;
       animation: mup .25s cubic-bezier(.32,0,.67,0);
     }
+    [data-theme="light"] .m-box {
+      /* v6.2: same fixed-navy bug as #tabBar/#smartBanner */
+      background: #ffffff;
+      border-top: 1px solid #e3e6eb;
+    }
 
     .m-handle {
       width: 36px;
@@ -3164,7 +3212,7 @@
       -webkit-overflow-scrolling: touch;
     }
     [data-theme="light"] #pgTrust {
-      background: linear-gradient(160deg, #f7f5f1 0%, #eef1f6 40%, #eaf1f8 100%);
+      background: #eef1f6;
     }
 
     #pgTrust::-webkit-scrollbar {
@@ -4240,6 +4288,12 @@
       min-height: 48px;
       flex-shrink: 0;
     }
+    [data-theme="light"] #smartBanner {
+      /* v6.2: same fixed-navy bug as #tabBar above */
+      background: #ffffff;
+      border-top: 1px solid #e3e6eb;
+      border-bottom: 1px solid #e3e6eb;
+    }
 
     .sbn-dot {
       width: 6px;
@@ -4255,6 +4309,7 @@
       flex: 1;
       line-height: 1.4;
     }
+    [data-theme="light"] .sbn-text { color: #1f2937; } /* was a hardcoded light-gray, unreadable once the banner itself went white */
 
     .sbn-action {
       font-size: 10px;
@@ -4265,6 +4320,7 @@
       cursor: pointer;
       padding: 4px 6px;
     }
+    [data-theme="light"] .sbn-action { color: var(--teal); } /* was a hardcoded light sky-blue, too low-contrast on white */
 
     .sbn-dots {
       display: flex;
@@ -4281,11 +4337,13 @@
       background: #334155;
       transition: all .3s;
     }
+    [data-theme="light"] .sbn-d { background: #d1d5db; } /* was a hardcoded dark slate */
 
     .sbn-d.on {
       background: #0ea5e9;
       width: 16px;
     }
+    [data-theme="light"] .sbn-d.on { background: var(--teal); }
 
     /* FIX-2: Focus mode 3 levels */
     /* Focus mode — 3 levels with comprehensive coverage */
