@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.2
+  VERSION:        v6.3
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -21,8 +21,8 @@
                   js/* and break offline support for the rest of the app)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
-  SW_CACHE:       sn-v12
-  APP_VER (SW):   6.2 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
+  SW_CACHE:       sn-v13
+  APP_VER (SW):   6.3 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -362,6 +362,34 @@
                 predates the theme system entirely (same code before v5.7 existed) and
                 its internal text-contrast math is a separate, older issue, not something
                 introduced by the theme work — flagged to the user, not fixed here.
+  v6.3          Two more categories of the same "hardcoded, missed by the token system"
+                bug, found via real-device screenshots (not caught by headless testing —
+                jsdom doesn't do visual layout):
+                (a) CONTRAST: 6 more hardcoded `color:#fff` text declarations that sit
+                directly on the general card/page background rather than a colored
+                button — .htxn-am (History amounts — the exact bug in the user's
+                screenshot; also dropped its text-shadow, which was the only thing
+                rendering once the white text became invisible), .sl-am (slice detail
+                amount), .trust-promise-text (onboarding), .ins-sharp-text (Insights
+                callout — sits on a mere 7%-opacity tint, effectively page background),
+                .tb-name (greeting name — sits on a mere 10%-opacity tint), and .bkt-ck
+                (a checkmark badge with NO background at all, in either theme). All
+                changed to var(--ink). Audited all 37 `color:#fff` declarations in the
+                file before touching any — most are fine (white text on a solid colored
+                button/badge background works in both themes); only fix the ones with no
+                real contrasting background of their own.
+                (b) LANDSCAPE/CARD-MODE LAYOUT: the real bug behind "landscape doesn't
+                work" wasn't sizing, it was position:fixed. #modal, #toast, #iBanner,
+                #fabAdd all used position:fixed, which anchors to the BROWSER VIEWPORT.
+                In mobile-portrait mode #app itself is position:fixed;inset:0 filling the
+                viewport, so this coincidentally worked. In card mode (tablet/desktop/
+                landscape phone, since v5.6) #app becomes position:relative and is a
+                smaller centered box — these 4 elements kept anchoring to the full
+                browser window instead, escaping the card and overlapping everything.
+                Fixed by changing all 4 to position:absolute — #app is always a
+                positioned element (fixed or relative) in both modes, so absolute
+                children are correctly contained either way. Zero behavior change in
+                portrait (the math is identical when #app fills the viewport exactly).
   env-config    v5.8: env-config.js detects local/QA/prod from location.hostname and
                 sets window.ENV = {name, label, debug, basePath, swPath, isProd}. MUST
                 load before app.js (it's first in <head>, before the theme bootstrap).

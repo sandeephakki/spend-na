@@ -992,7 +992,7 @@
     .tb-name {
       font-size: 30px;
       font-weight: 900;
-      color: #fff;
+      color: var(--ink); /* v6.3: was hardcoded #fff — .topbar (its wrapper) is only rgba(14,165,233,.10), effectively still the light page background in light theme */
       letter-spacing: -1px;
       line-height: 1;
       white-space: nowrap;
@@ -1783,6 +1783,7 @@
       width: 18px;
       height: 18px;
       border-radius: 9px;
+      background: var(--teal); /* v6.3: was missing entirely — a bare white ✓ with no backing circle, invisible on a light card and marginal even on the original dark glass card */
       display: none;
       align-items: center;
       justify-content: center;
@@ -2210,7 +2211,7 @@
     .sl-am {
       font-size: 40px;
       font-weight: 800;
-      color: #fff;
+      color: var(--ink); /* v6.3: was hardcoded #fff — same bug as .htxn-am */
       letter-spacing: -1.5px;
       margin-bottom: 4px;
     }
@@ -2491,10 +2492,9 @@
     .htxn-am {
       font-size: 17px;
       font-weight: 800;
-      color: #fff;
+      color: var(--ink); /* v6.3: was hardcoded #fff — invisible on a light card once v6.1 made cards solid white; the text-shadow below was the only thing rendering, as a ghostly dark smudge (see user screenshot) */
       white-space: nowrap;
       letter-spacing: -.5px;
-      text-shadow: 0 0 12px rgba(var(--ink-rgb),.25);
     }
 
     .htxn-src {
@@ -3009,7 +3009,16 @@
    MODAL
 ═══════════════════════════════════════════════════ */
     #modal {
-      position: fixed;
+      /* v6.3: was position:fixed — correct in mobile mode where #app IS the
+         viewport (position:fixed;inset:0), but in card mode (tablet/desktop/
+         landscape phone, since v5.6) #app becomes position:relative and no
+         longer fills the viewport. A fixed child still measures against the
+         real browser viewport, not the card, so this modal was covering the
+         WHOLE SCREEN and misaligning with everything else in the card — the
+         overlapping mess in the user's landscape screenshot. #app is always
+         a positioned element (fixed or relative) in both modes, so
+         position:absolute here is correctly contained either way. */
+      position: absolute;
       inset: 0;
       background: rgba(5,10,20,.70);
       backdrop-filter: blur(8px);
@@ -3119,7 +3128,8 @@
    TOAST
 ═══════════════════════════════════════════════════ */
     #toast {
-      position: fixed;
+      /* v6.3: was position:fixed — same containing-block bug as #modal above */
+      position: absolute;
       bottom: calc(var(--safe-b) + 90px);
       left: 50%;
       transform: translateX(-50%) translateY(20px);
@@ -3151,7 +3161,8 @@
    INSTALL NUDGE
 ═══════════════════════════════════════════════════ */
     #iBanner {
-      position: fixed;
+      /* v6.3: was position:fixed — same containing-block bug as #modal above */
+      position: absolute;
       bottom: 0;
       left: 0;
       right: 0;
@@ -3285,7 +3296,7 @@
     .trust-promise-text {
       font-size: 22px;
       font-weight: 800;
-      color: #ffffff;
+      color: var(--ink); /* v6.3: was hardcoded #ffffff — invisible on #pgTrust's light background */
       line-height: 1.45;
       letter-spacing: -0.3px;
     }
@@ -3547,7 +3558,7 @@
     .ins-sharp-text {
       font-size: 15px;
       font-weight: 700;
-      color: #fff;
+      color: var(--ink); /* v6.3: was hardcoded #fff — its wrapper .ins-sharp is only a 7%-opacity ink tint, essentially still the page's light background in light theme */
       line-height: 1.6;
     }
 
@@ -4671,7 +4682,12 @@
 
   /* ── REDESIGN v5.0: FLOATING ADD BUTTON (FAB) ── */
   #fabAdd {
-    position: fixed;
+    /* v6.3: was position:fixed — same containing-block bug as #modal above.
+       This is likely the most visible instance: in card mode the FAB was
+       pinned to the bottom-right of the actual browser window rather than
+       the card, so it could sit outside the card entirely or drift away
+       from the rest of the UI depending on window size. */
+    position: absolute;
     bottom: calc(var(--safe-b) + 68px);
     right: max(20px, var(--safe-r));
     width: 58px; height: 58px;
