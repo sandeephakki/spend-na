@@ -1,7 +1,11 @@
-const C = 'sn-v5';
-const APP_VER = '5.5';
+const C = 'sn-v10';
+const APP_VER = '6.0';
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(C).then(c => c.add('/').catch(() => {})));
+  // v5.8: was caches.open(C).then(c => c.add('/')) — an absolute '/' resolves
+  // to the origin root, which is wrong under a GitHub Pages project subpath
+  // (e.g. /repo-name/). './' resolves relative to this script's own scope,
+  // which is correct in both a root deployment and a subpath one.
+  e.waitUntil(caches.open(C).then(c => c.add('./').catch(() => {})));
   self.skipWaiting();
 });
 self.addEventListener('activate', e => {
