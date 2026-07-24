@@ -1994,14 +1994,14 @@
 
     .mm-tl {
       font-size: 12px;
-      color: var(--slate);
+      color: rgba(255,255,255,.72); /* v6.5: was var(--slate) — fixed to match the hero's now-fixed-dark background */
       margin-bottom: 4px;
     }
 
     .mm-tv {
       font-size: 30px;
       font-weight: 800;
-      color: var(--teal);
+      color: #38bdf8; /* v6.5: was var(--teal) — fixed to the bright dark-theme shade; the deepened light-theme teal would be too dark against the hero's now-fixed-dark background */
       letter-spacing: -1px;
     }
 
@@ -3463,6 +3463,34 @@
       margin-bottom: 12px;
     }
 
+    /* NORMALIZE — v6.4 */
+    .norm-card {
+      background: var(--card);
+      border-radius: var(--rL);
+      padding: 16px;
+      border: 1px solid var(--fog);
+      box-shadow: var(--sh);
+      margin-bottom: 12px;
+    }
+    .norm-opt {
+      font-family: var(--ff);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--slate);
+      background: var(--paper);
+      border: 1.5px solid var(--fog);
+      border-radius: 20px;
+      padding: 6px 12px;
+      cursor: pointer;
+      transition: all .12s;
+    }
+    .norm-opt.on {
+      border-color: var(--teal);
+      background: var(--tealL);
+      color: var(--tealD);
+    }
+    .norm-opt:active { transform: scale(.96); }
+
     .ins-card-title {
       font-size: 10px;
       font-weight: 700;
@@ -4743,7 +4771,7 @@
     text-transform: uppercase; letter-spacing: .14em; margin-bottom: 8px;
   }
   .personality-title {
-    font-size: 26px; font-weight: 900; color: #fff;
+    font-size: 26px; font-weight: 900; color: var(--ink); /* v6.5: was hardcoded #fff — .personality-badge's background is only a 4-8% ink tint, essentially the page background in light theme */
     letter-spacing: -.8px; line-height: 1.1; margin-bottom: 8px;
   }
   .personality-desc {
@@ -4752,12 +4780,20 @@
 
   /* ── REDESIGN v5.0: MY MONTH HERO ── */
   .mm-hero {
-    background: var(--ink);
+    /* v6.5: was var(--ink) — "inverted highlight" meant to always look dark
+       regardless of overall theme, but --ink IS the theme (near-white in
+       dark mode, near-black in light mode), so this was near-WHITE with
+       near-white text in the ORIGINAL dark-only app — pre-existing,
+       unrelated to the light-theme work, just never previously noticed.
+       Fixed dark navy now, matching the splash/trust screen gradient, so
+       the design intent (always-dark highlight card) actually holds in
+       both themes. */
+    background: linear-gradient(160deg, #0d1117 0%, #111827 40%, #0f2340 100%);
     padding: 20px max(20px,var(--safe-r)) 28px max(20px,var(--safe-l));
   }
   .mm-tc {
     background: rgba(15,23,42,.75);
-    border: 1px solid rgba(var(--ink-rgb),.15);
+    border: 1px solid rgba(255,255,255,.15); /* v6.5: was rgba(var(--ink-rgb),.15) — fixed since the hero background above is now fixed too */
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
   }
@@ -4775,20 +4811,22 @@
 
   /* ── REDESIGN v5.0: ANNUAL WRAP ── */
   #pgAnnualWrap {
-    background: var(--ink);
+    /* v6.5: was var(--ink) — same pre-existing bug as .mm-hero above (near-
+       white bg + white text in the original dark-only app). Fixed dark. */
+    background: linear-gradient(160deg, #0d1117 0%, #111827 40%, #0f2340 100%);
     z-index: 500;
   }
   .aw-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: calc(var(--safe-t) + 12px) 20px 12px;
-    border-bottom: 1px solid rgba(var(--ink-rgb),.08);
+    border-bottom: 1px solid rgba(255,255,255,.08); /* v6.5: fixed, was rgba(var(--ink-rgb),.08) */
   }
   .aw-title {
     font-size: 15px; font-weight: 800; color: #fff;
   }
   .aw-close, .aw-share {
     font-size: 14px; font-weight: 700;
-    color: var(--teal); background: none; border: none; cursor: pointer;
+    color: #38bdf8; background: none; border: none; cursor: pointer; /* v6.5: fixed bright teal, was var(--teal) */
     padding: 6px 10px;
   }
   .aw-body {
@@ -4797,8 +4835,8 @@
     -webkit-overflow-scrolling: touch;
   }
   .aw-card {
-    background: rgba(var(--ink-rgb),.05);
-    border: 1px solid rgba(var(--ink-rgb),.08);
+    background: rgba(255,255,255,.05); /* v6.5: fixed, was rgba(var(--ink-rgb),.05) */
+    border: 1px solid rgba(255,255,255,.08); /* v6.5: fixed, was rgba(var(--ink-rgb),.08) */
     border-radius: 18px; padding: 20px;
     animation: fadeSlideUp .4s ease both;
   }
@@ -4813,7 +4851,7 @@
     to { opacity: 1; transform: translateY(0); }
   }
   .aw-label {
-    font-size: 9px; font-weight: 800; color: var(--teal);
+    font-size: 9px; font-weight: 800; color: #38bdf8; /* v6.5: fixed bright teal, was var(--teal) */
     text-transform: uppercase; letter-spacing: .12em; margin-bottom: 6px;
   }
   .aw-value {
@@ -4821,7 +4859,7 @@
     letter-spacing: -1.5px; line-height: 1;
   }
   .aw-sub {
-    font-size: 12px; color: rgba(var(--ink-rgb),.45); margin-top: 4px;
+    font-size: 12px; color: rgba(255,255,255,.45); margin-top: 4px; /* v6.5: fixed, was rgba(var(--ink-rgb),.45) */
   }
 
   /* ── REDESIGN v5.0: CATEGORY CREEP CARD ── */

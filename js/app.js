@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.3';
+        const APP_VER = '6.5';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -1571,7 +1571,7 @@
         const topbar = document.getElementById('topbar'), tabbar = document.getElementById('tabBar');
         topbar.style.display = tab === 'home' ? 'block' : 'none';
         tabbar.style.display = ['home', 'insights', 'month', 'history', 'sources', 'add'].includes(tab) ? 'flex' : 'none';
-        const map = { home: 'sHome', insights: 'sInsights', month: 'sMonth', history: 'sHist', add: 'sAdd', limits: 'sLimits', settings: 'sSettings', slice: 'sSlice', sources: 'sSources' };
+        const map = { home: 'sHome', insights: 'sInsights', month: 'sMonth', history: 'sHist', add: 'sAdd', limits: 'sLimits', settings: 'sSettings', slice: 'sSlice', sources: 'sSources', normalize: 'sNormalize' };
         document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
         const el = document.getElementById(map[tab]); if (el) el.classList.add('on');
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.t === tab));
@@ -1867,9 +1867,7 @@
       // ── INSIGHTS ──
       r_insights() {
         const txns = D.transactions || [];
-        const now = new Date();
-        const month = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-        document.getElementById('insightsSub').textContent = month;
+        document.getElementById('insightsSub').textContent = 'All time';
         const body = document.getElementById('insightsBody');
 
         if (txns.length === 0) {
@@ -1882,171 +1880,36 @@
           return;
         }
 
-        // ── Summary ──
-        const sorted = txns.filter(t => t.bucket);
-        const total = sorted.reduce((s, t) => s + t.amount, 0);
-        const bTotals = {};
-        Object.keys(BUCKETS).forEach(k => bTotals[k] = 0);
-        sorted.forEach(t => { bTotals[t.bucket] = (bTotals[t.bucket] || 0) + t.amount; });
-
-        // ── Spending Personality ──
-        const luxPct = total > 0 ? (bTotals.luxury / total) * 100 : 0;
-        const comPct = total > 0 ? (bTotals.committed / total) * 100 : 0;
-        const necPct = total > 0 ? (bTotals.necessary / total) * 100 : 0;
-        const cftPct = total > 0 ? (bTotals.comfortable / total) * 100 : 0;
-        let personality, pIcon, pColor, pDesc;
-        if (luxPct > 30) {
-          personality = 'Luxury Lover'; pIcon = '✨'; pColor = 'var(--lux)';
-          pDesc = 'More than 30% goes to splurge. Every spend is a choice — make it count.';
-        } else if (comPct > 50) {
-          personality = 'Commitment First'; pIcon = '🏦'; pColor = 'var(--com)';
-          pDesc = 'Over half your money goes to fixed obligations. Disciplined, but watch flexibility.';
-        } else if (necPct > 60) {
-          personality = 'Essential Spender'; pIcon = '🏠'; pColor = 'var(--nec)';
-          pDesc = 'Most money covers survival needs. You keep things lean and real.';
-        } else if (cftPct > 35) {
-          personality = 'Comfort Seeker'; pIcon = '🛍'; pColor = 'var(--cft)';
-          pDesc = 'Lifestyle spending is dominant. You enjoy life — just keep an eye on the balance.';
-        } else {
-          personality = 'Balanced Spender'; pIcon = '⚖️'; pColor = 'var(--teal)';
-          pDesc = 'Your money is spread across buckets. No single area dominates — that is healthy.';
-        }
-
-        // ── Top bucket ──
-        const topBkt = Object.entries(bTotals).sort((a, b) => b[1] - a[1])[0];
-        const topCfg = BUCKETS[topBkt[0]];
-
-        // ── Weekly breakdown ──
-        const weeks = { W1: 0, W2: 0, W3: 0, W4: 0 };
-        sorted.forEach(t => {
-          const day = parseInt(t.date) || 1;
-          const wk = day <= 7 ? 'W1' : day <= 14 ? 'W2' : day <= 21 ? 'W3' : 'W4';
-          weeks[wk] += t.amount;
-        });
-        const wEntries = Object.entries(weeks).filter(([, v]) => v > 0);
-        const bestWk = wEntries.length ? wEntries.reduce((a, b) => a[1] < b[1] ? a : b) : null;
-        const worstWk = wEntries.length ? wEntries.reduce((a, b) => a[1] > b[1] ? a : b) : null;
-
-        // ── Streak (days with at least one transaction) ──
-        const days = new Set(txns.map(t => t.date));
-        const streak = days.size;
-
-        // ── Sharp insight ──
-        const top2 = Object.entries(bTotals).sort((a, b) => b[1] - a[1]).slice(0, 2);
-        const top2pct = total > 0 ? Math.round(((top2[0][1] + top2[1][1]) / total) * 100) : 0;
-        const avgSpend = txns.length > 0 ? Math.round(total / txns.length) : 0;
-        const mostFreq = {};
-        txns.forEach(t => { mostFreq[t.merchant] = (mostFreq[t.merchant] || 0) + 1; });
-        const topMerchant = Object.entries(mostFreq).sort((a, b) => b[1] - a[1])[0];
-        let sharpText;
-        if (top2pct > 80 && top2.length === 2) {
-          sharpText = `${top2pct}% of your total money went to just 2 buckets — ${BUCKETS[top2[0][0]].l} and ${BUCKETS[top2[1][0]].l}.`;
-        } else if (topMerchant && topMerchant[1] >= 3) {
-          sharpText = `"${topMerchant[0]}" appears ${topMerchant[1]} times — your most frequent spend this month.`;
-        } else if (avgSpend > 0) {
-          sharpText = `Your average spend per transaction is ${fmtF(avgSpend)}. ${avgSpend > 500 ? 'Each entry carries real weight.' : 'Small amounts — but they add up fast.'}`;
-        } else {
-          sharpText = `You have ${txns.length} transactions recorded. Every entry is a step toward clarity.`;
-        }
-
-        // ── Monthly history (last 4 months) ──
-        const mHistory = {};
-        txns.forEach(t => {
-          const mk = t.month || 'Unknown';
-          mHistory[mk] = (mHistory[mk] || 0) + t.amount;
-        });
-        const mEntries = Object.entries(mHistory).slice(-4);
-        const mMax = Math.max(...mEntries.map(([, v]) => v), 1);
-
-        // ── Limits check ──
-        const overLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] > v);
-        const nearLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] >= v * BUDGET_WARN_PCT && bTotals[k] <= v);
-
-        // ── Tag summary (lifetime totals across ALL months) ──
+        // ── OVERVIEW — genuinely cross-month cards only. These either need
+        // multiple months to compute (trend chart, category creep) or
+        // explicitly compare one month to another (spend twin), so they stay
+        // as a single all-time section rather than repeating per month.
+        // Tag totals are lifetime by design (a tag like #coffee spans months).
         const tagTotals = {};
         const tagCounts = {};
-        (D.transactions || []).forEach(t => {
+        txns.forEach(t => {
           if (!(Number(t.amount) > 0)) return; // skip 0-amount — no meaningful spend (F-013)
           (t.tags || []).forEach(tag => {
             tagTotals[tag] = (tagTotals[tag] || 0) + (Number(t.amount) || 0);
             tagCounts[tag] = (tagCounts[tag] || 0) + 1;
           });
         });
-        // Sort by amount descending (U-015)
         const tagEntries = Object.entries(tagTotals).sort((a, b) => b[1] - a[1]);
 
-        body.innerHTML = `
-      <!-- PERSONALITY (v5.0 redesign) -->
-      <div class="personality-badge">
-        <div class="personality-label">YOUR SPENDING PERSONALITY</div>
-        <div class="personality-title">${pIcon} ${personality}</div>
-        <div class="personality-desc">${pDesc}</div>
-      </div>
+        const mHistory = {};
+        txns.forEach(t => { const mk = t.month || 'Unknown'; mHistory[mk] = (mHistory[mk] || 0) + t.amount; });
+        const mEntries = Object.entries(mHistory).slice(-4);
+        const mMax = Math.max(...mEntries.map(([, v]) => v), 1);
+        const nowShort = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 
-      <!-- SHARP INSIGHT -->
-      <div class="ins-sharp">
-        <div class="ins-sharp-label">◈ THIS MONTH'S INSIGHT</div>
-        <div class="ins-sharp-text">${sharpText}</div>
-      </div>
-
-      <!-- STATS ROW -->
-      <div class="ins-stat-row">
-        <div class="ins-stat">
-          <div class="ins-stat-val">${txns.length}</div>
-          <div class="ins-stat-lbl">Total entries</div>
-          <div class="ins-stat-sub" style="color:var(--teal)">${sorted.length} sorted</div>
-        </div>
-        <div class="ins-stat">
-          <div class="ins-stat-val">${streak}</div>
-          <div class="ins-stat-lbl">Days recorded</div>
-          <div class="ins-stat-sub" style="color:var(--ok)">Keep the habit</div>
-        </div>
-      </div>
-
-      <!-- BUCKET BREAKDOWN -->
-      <div class="ins-card">
-        <div class="ins-card-title">WHERE YOUR MONEY WENT</div>
-        ${Object.entries(BUCKETS).map(([k, c]) => {
-          const amt = bTotals[k] || 0;
-          const pct = total > 0 ? Math.round((amt / total) * 100) : 0;
-          const lim = D.limits[k] || 0;
-          const isOver = lim > 0 && amt > lim;
-          const isNear = lim > 0 && amt >= lim * BUDGET_WARN_PCT && !isOver;
-          return `<div class="ins-bar-row">
-            <div class="ins-bar-label">${c.l}</div>
-            <div class="ins-bar-track">
-              <div class="ins-bar-fill" style="background:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : c.c};width:${pct}%"></div>
-            </div>
-            <div class="ins-bar-val" style="color:${isOver ? 'var(--err)' : c.c}">${pct}%</div>
-          </div>`;
-        }).join('')}
-        ${overLimit.length > 0 ? `<div style="background:var(--luxL);border-radius:var(--r);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--err);font-weight:600">⚠️ Over budget in: ${overLimit.map(([k]) => BUCKETS[k].l).join(', ')}</div>` : ''}
-        ${nearLimit.length > 0 && overLimit.length === 0 ? `<div style="background:var(--cftL);border-radius:var(--r);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--cft);font-weight:600">⚡ Near limit: ${nearLimit.map(([k]) => BUCKETS[k].l).join(', ')}</div>` : ''}
-      </div>
-
-      <!-- TOP + WEEKLY STATS -->
-      <div class="ins-stat-row">
-        <div class="ins-stat">
-          <div style="font-size:20px;margin-bottom:4px">${topCfg.g}</div>
-          <div class="ins-stat-val" style="font-size:16px;color:${topCfg.c}">${topCfg.l}</div>
-          <div class="ins-stat-lbl">Top bucket</div>
-          <div class="ins-stat-sub" style="color:${topCfg.c}">${fmtF(topBkt[1])}</div>
-        </div>
-        ${worstWk ? `<div class="ins-stat">
-          <div style="font-size:20px;margin-bottom:4px">📅</div>
-          <div class="ins-stat-val" style="font-size:16px">${worstWk[0]}</div>
-          <div class="ins-stat-lbl">Heaviest week</div>
-          <div class="ins-stat-sub" style="color:var(--lux)">${fmtF(worstWk[1])}</div>
-        </div>` : '<div class="ins-stat"><div class="ins-stat-lbl" style="margin-top:8px">Add more spends to see weekly patterns</div></div>'}
-      </div>
-
+        const overviewHtml = `
       <!-- MONTHLY HISTORY -->
       ${mEntries.length > 1 ? `<div class="ins-card">
         <div class="ins-card-title">MONTH BY MONTH</div>
         <div class="mcomp-bars">
           ${mEntries.map(([mon, amt]) => {
           const h = Math.max((amt / mMax) * 70, 6);
-          const isThis = mon === now.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+          const isThis = mon === nowShort;
           return `<div class="mcomp-col">
               <div class="mcomp-val">${amt >= 1000 ? Math.round(amt / 1000) + 'k' : amt}</div>
               <div class="mcomp-bar" style="height:${h}px;background:${isThis ? 'var(--teal)' : 'var(--fog)'};border:${isThis ? 'none' : '1px solid var(--cardB)'}"></div>
@@ -2086,12 +1949,13 @@
         } catch(e) { return ''; }
       })()}
 
-      <!-- SPEND TWIN (ST-01) — was defined but never wired into a render -->
+      <!-- SPEND TWIN (ST-01) -->
       ${(() => {
         try {
           const twin = generateSpendTwin(offsetMonthStr(0));
           if (!twin) return '';
-          const delta = total - twin.total;
+          const curTotal = txns.filter(t => t.bucket && t.month === offsetMonthStr(0)).reduce((s,t)=>s+t.amount,0);
+          const delta = curTotal - twin.total;
           const pct = twin.total > 0 ? Math.round((delta / twin.total) * 100) : 0;
           const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
           const col = delta > 0 ? 'var(--err)' : delta < 0 ? 'var(--ok)' : 'var(--slate)';
@@ -2100,13 +1964,175 @@
             <div style="font-size:12px;color:var(--slate);line-height:1.6">
               That month had a similar spending shape (${twin.similarity}% match).
               You spent <span style="font-weight:700;color:${col}">${arrow} ${Math.abs(pct)}%</span>
-              ${delta >= 0 ? 'more' : 'less'} this month — ${fmtF(total)} vs ${fmtF(twin.total)}.
+              ${delta >= 0 ? 'more' : 'less'} this month — ${fmtF(curTotal)} vs ${fmtF(twin.total)}.
             </div>
           </div>`;
         } catch(e) { return ''; }
-      })()}
+      })()}`;
 
-      <!-- DAY-OF-WEEK SPEND (DOW-01) — new, passive display, no toggle -->
+        // ── MONTH-WISE SECTIONS — personality/sharp-insight/stats/buckets/
+        // top-bucket/heaviest-week/day-of-week all recompute scoped to ONE
+        // month each, collapsible like History's month groups, so patterns
+        // from different months never blend into one confusing average.
+        const grp = {};
+        txns.forEach(t => { const k = t.month || 'Unknown'; if (!grp[k]) grp[k] = []; grp[k].push(t); });
+        const monthKeys = Object.keys(grp).sort((a, b) => new Date('1 ' + b) - new Date('1 ' + a)); // most recent first
+        if (!S.insExpanded) S.insExpanded = {};
+
+        const monthSections = monthKeys.map(mon => {
+          const monthTxns = grp[mon];
+          const isCurrentMonth = mon === nowShort;
+          const expanded = S.insExpanded[mon] !== undefined ? S.insExpanded[mon] : isCurrentMonth;
+          const arrow = expanded ? '▾' : '▸';
+          const safeKey = mon.replace(/\s+/g, '-');
+          const monthTotal = monthTxns.reduce((s, t) => s + t.amount, 0);
+          return `<div>
+            <div class="mgrp-hdr" onclick="APP.toggleInsightMonth('${esc(mon)}')" style="cursor:pointer;user-select:none">
+              <div class="mgrp-nm"><span id="insgrp-arrow-${safeKey}" style="margin-right:6px;font-size:12px">${arrow}</span>${esc(mon)}</div>
+              <div class="mgrp-tot">${fmtF(monthTotal)}</div>
+            </div>
+            <div id="insgrp-body-${safeKey}" style="display:${expanded ? '' : 'none'}">
+              ${this._renderInsightMonthCards(monthTxns, mon)}
+            </div>
+          </div>`;
+        }).join('');
+
+        body.innerHTML = overviewHtml +
+          `<div style="margin:20px 0 8px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--mist);text-transform:uppercase">Month by month</div>` +
+          monthSections +
+          `<!-- FOOTER NOTE -->
+      <div style="text-align:center;padding:12px 0 4px">
+        <div style="font-size:11px;color:var(--mist);line-height:1.8">Insights are based on your sorted transactions.<br>Sort more spends for sharper patterns.</div>
+      </div>`;
+      },
+
+      // One month's worth of personality/sharp-insight/stats/buckets/top+week/
+      // day-of-week cards — same computations the old all-time r_insights did,
+      // just parameterized on a single month's transactions instead of all of them.
+      _renderInsightMonthCards(txns, monthLabel) {
+        const sorted = txns.filter(t => t.bucket);
+        const total = sorted.reduce((s, t) => s + t.amount, 0);
+        const bTotals = {};
+        Object.keys(BUCKETS).forEach(k => bTotals[k] = 0);
+        sorted.forEach(t => { bTotals[t.bucket] = (bTotals[t.bucket] || 0) + t.amount; });
+
+        const luxPct = total > 0 ? (bTotals.luxury / total) * 100 : 0;
+        const comPct = total > 0 ? (bTotals.committed / total) * 100 : 0;
+        const necPct = total > 0 ? (bTotals.necessary / total) * 100 : 0;
+        const cftPct = total > 0 ? (bTotals.comfortable / total) * 100 : 0;
+        let personality, pIcon, pDesc;
+        if (luxPct > 30) {
+          personality = 'Luxury Lover'; pIcon = '✨';
+          pDesc = 'More than 30% goes to splurge. Every spend is a choice — make it count.';
+        } else if (comPct > 50) {
+          personality = 'Commitment First'; pIcon = '🏦';
+          pDesc = 'Over half your money goes to fixed obligations. Disciplined, but watch flexibility.';
+        } else if (necPct > 60) {
+          personality = 'Essential Spender'; pIcon = '🏠';
+          pDesc = 'Most money covers survival needs. You keep things lean and real.';
+        } else if (cftPct > 35) {
+          personality = 'Comfort Seeker'; pIcon = '🛍';
+          pDesc = 'Lifestyle spending is dominant. You enjoy life — just keep an eye on the balance.';
+        } else {
+          personality = 'Balanced Spender'; pIcon = '⚖️';
+          pDesc = 'Your money is spread across buckets. No single area dominates — that is healthy.';
+        }
+
+        const topBkt = Object.entries(bTotals).sort((a, b) => b[1] - a[1])[0];
+        const topCfg = BUCKETS[topBkt[0]];
+
+        const weeks = { W1: 0, W2: 0, W3: 0, W4: 0 };
+        sorted.forEach(t => {
+          const day = parseInt(t.date) || 1;
+          const wk = day <= 7 ? 'W1' : day <= 14 ? 'W2' : day <= 21 ? 'W3' : 'W4';
+          weeks[wk] += t.amount;
+        });
+        const wEntries = Object.entries(weeks).filter(([, v]) => v > 0);
+        const worstWk = wEntries.length ? wEntries.reduce((a, b) => a[1] > b[1] ? a : b) : null;
+
+        const days = new Set(txns.map(t => t.date));
+        const streak = days.size;
+
+        const top2 = Object.entries(bTotals).sort((a, b) => b[1] - a[1]).slice(0, 2);
+        const top2pct = total > 0 ? Math.round(((top2[0][1] + top2[1][1]) / total) * 100) : 0;
+        const avgSpend = txns.length > 0 ? Math.round(total / txns.length) : 0;
+        const mostFreq = {};
+        txns.forEach(t => { mostFreq[t.merchant] = (mostFreq[t.merchant] || 0) + 1; });
+        const topMerchant = Object.entries(mostFreq).sort((a, b) => b[1] - a[1])[0];
+        let sharpText;
+        if (top2pct > 80 && top2.length === 2) {
+          sharpText = `${top2pct}% of your total money went to just 2 buckets — ${BUCKETS[top2[0][0]].l} and ${BUCKETS[top2[1][0]].l}.`;
+        } else if (topMerchant && topMerchant[1] >= 3) {
+          sharpText = `"${topMerchant[0]}" appears ${topMerchant[1]} times — your most frequent spend this month.`;
+        } else if (avgSpend > 0) {
+          sharpText = `Your average spend per transaction is ${fmtF(avgSpend)}. ${avgSpend > 500 ? 'Each entry carries real weight.' : 'Small amounts — but they add up fast.'}`;
+        } else {
+          sharpText = `You have ${txns.length} transactions recorded. Every entry is a step toward clarity.`;
+        }
+
+        const overLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] > v);
+        const nearLimit = Object.entries(D.limits).filter(([k, v]) => v > 0 && bTotals[k] >= v * BUDGET_WARN_PCT && bTotals[k] <= v);
+
+        return `
+      <div class="personality-badge">
+        <div class="personality-label">SPENDING PERSONALITY</div>
+        <div class="personality-title">${pIcon} ${personality}</div>
+        <div class="personality-desc">${pDesc}</div>
+      </div>
+
+      <div class="ins-sharp">
+        <div class="ins-sharp-label">◈ ${esc(monthLabel).toUpperCase()} INSIGHT</div>
+        <div class="ins-sharp-text">${sharpText}</div>
+      </div>
+
+      <div class="ins-stat-row">
+        <div class="ins-stat">
+          <div class="ins-stat-val">${txns.length}</div>
+          <div class="ins-stat-lbl">Total entries</div>
+          <div class="ins-stat-sub" style="color:var(--teal)">${sorted.length} sorted</div>
+        </div>
+        <div class="ins-stat">
+          <div class="ins-stat-val">${streak}</div>
+          <div class="ins-stat-lbl">Days recorded</div>
+          <div class="ins-stat-sub" style="color:var(--ok)">Keep the habit</div>
+        </div>
+      </div>
+
+      <div class="ins-card">
+        <div class="ins-card-title">WHERE YOUR MONEY WENT</div>
+        ${Object.entries(BUCKETS).map(([k, c]) => {
+          const amt = bTotals[k] || 0;
+          const pct = total > 0 ? Math.round((amt / total) * 100) : 0;
+          const lim = D.limits[k] || 0;
+          const isOver = lim > 0 && amt > lim;
+          const isNear = lim > 0 && amt >= lim * BUDGET_WARN_PCT && !isOver;
+          return `<div class="ins-bar-row">
+            <div class="ins-bar-label">${c.l}</div>
+            <div class="ins-bar-track">
+              <div class="ins-bar-fill" style="background:${isOver ? 'var(--err)' : isNear ? 'var(--warn)' : c.c};width:${pct}%"></div>
+            </div>
+            <div class="ins-bar-val" style="color:${isOver ? 'var(--err)' : c.c}">${pct}%</div>
+          </div>`;
+        }).join('')}
+        ${overLimit.length > 0 ? `<div style="background:var(--luxL);border-radius:var(--r);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--err);font-weight:600">⚠️ Over budget in: ${overLimit.map(([k]) => BUCKETS[k].l).join(', ')}</div>` : ''}
+        ${nearLimit.length > 0 && overLimit.length === 0 ? `<div style="background:var(--cftL);border-radius:var(--r);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--cft);font-weight:600">⚡ Near limit: ${nearLimit.map(([k]) => BUCKETS[k].l).join(', ')}</div>` : ''}
+      </div>
+
+      <div class="ins-stat-row">
+        <div class="ins-stat">
+          <div style="font-size:20px;margin-bottom:4px">${topCfg.g}</div>
+          <div class="ins-stat-val" style="font-size:16px;color:${topCfg.c}">${topCfg.l}</div>
+          <div class="ins-stat-lbl">Top bucket</div>
+          <div class="ins-stat-sub" style="color:${topCfg.c}">${fmtF(topBkt[1])}</div>
+        </div>
+        ${worstWk ? `<div class="ins-stat">
+          <div style="font-size:20px;margin-bottom:4px">📅</div>
+          <div class="ins-stat-val" style="font-size:16px">${worstWk[0]}</div>
+          <div class="ins-stat-lbl">Heaviest week</div>
+          <div class="ins-stat-sub" style="color:var(--lux)">${fmtF(worstWk[1])}</div>
+        </div>` : '<div class="ins-stat"><div class="ins-stat-lbl" style="margin-top:8px">Add more spends to see weekly patterns</div></div>'}
+      </div>
+
       ${(() => {
         try {
           const dowTotals = [0,0,0,0,0,0,0];
@@ -2134,12 +2160,116 @@
           </div>`;
         } catch(e) { return ''; }
       })()}
-
-      <!-- FOOTER NOTE -->
-      <div style="text-align:center;padding:12px 0 4px">
-        <div style="font-size:11px;color:var(--mist);line-height:1.8">Insights are based on your sorted transactions.<br>Sort more spends for sharper patterns.</div>
-      </div>
     `;
+      },
+
+      toggleInsightMonth(mon) {
+        if (!S.insExpanded) S.insExpanded = {};
+        const nowKey = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+        S.insExpanded[mon] = !(S.insExpanded[mon] !== undefined ? S.insExpanded[mon] : (mon === nowKey));
+        const safeKey = mon.replace(/\s+/g, '-');
+        const b = document.getElementById('insgrp-body-' + safeKey);
+        const a = document.getElementById('insgrp-arrow-' + safeKey);
+        if (b) b.style.display = S.insExpanded[mon] ? '' : 'none';
+        if (a) a.textContent = S.insExpanded[mon] ? '▾' : '▸';
+      },
+
+      // ── NORMALIZE (v6.4) ──
+      // Nothing here writes to D until the user hits Apply — S.normConflicts/
+      // S.normChoices are just draft/review state, safe to recompute freely.
+      r_normalize() {
+        const conflicts = _computeNormalizeConflicts();
+        S.normConflicts = conflicts;
+        if (!S.normChoices) S.normChoices = {};
+        conflicts.forEach((c, i) => { if (S.normChoices[i] === undefined) S.normChoices[i] = c.recommended; });
+
+        const body = document.getElementById('normBody');
+        if (conflicts.length === 0) {
+          body.innerHTML = `<div class="ins-empty">
+            <div style="font-size:48px;margin-bottom:16px">✅</div>
+            <div style="font-size:20px;font-weight:800;color:var(--ink);margin-bottom:8px">All normalized</div>
+            <div style="font-size:14px;color:var(--slate);text-align:center;line-height:1.6">No inconsistent buckets, tags, or merchant<br>spellings found across your records.</div>
+          </div>`;
+          return;
+        }
+
+        const typeLabel = { 'tag-bucket': 'Tag → bucket', 'merchant-name': 'Merchant spelling', 'merchant-bucket': 'Merchant → bucket', 'merchant-tag': 'Merchant → tag' };
+        const fieldNoun = { bucket: 'bucket', merchant: 'name', tag: 'tag' };
+
+        body.innerHTML = `
+          <div style="font-size:12px;color:var(--slate);line-height:1.6;margin-bottom:16px">
+            Found <b style="color:var(--ink)">${conflicts.length}</b> group${conflicts.length !== 1 ? 's' : ''} of records that don't agree with each other.
+            Pick which ${conflicts.length !== 1 ? 'ones are' : 'one is'} correct for each — the rest will be updated to match.
+          </div>
+          ${conflicts.map((c, i) => {
+            const chosen = S.normChoices[i];
+            const optsHtml = c.options.map(opt => {
+              const isBucket = c.field === 'bucket';
+              const bktCfg = isBucket && BUCKETS[opt.value] ? BUCKETS[opt.value] : null;
+              const displayVal = bktCfg ? bktCfg.l : (opt.value === '(none)' ? 'No tag' : opt.value === '(unsorted)' ? 'Unsorted' : opt.value);
+              const isSel = chosen === opt.value;
+              return `<button onclick="APP.normPick(${i},'${esc(opt.value).replace(/'/g, "\\'")}')"
+                class="norm-opt${isSel ? ' on' : ''}"
+                style="${isSel && bktCfg ? `background:${bktCfg.c};border-color:${bktCfg.c};color:#fff` : ''}">
+                ${displayVal} <span style="opacity:.7">(${opt.count})</span>
+              </button>`;
+            }).join('');
+            return `<div class="norm-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:15px;font-weight:800;color:var(--ink)">${esc(c.label)}</div>
+                <div style="font-size:10px;font-weight:700;color:var(--mist);letter-spacing:.04em;text-transform:uppercase">${typeLabel[c.type]}</div>
+              </div>
+              <div style="font-size:11px;color:var(--slate);margin-bottom:10px">${c.txnIds.length} records disagree on ${fieldNoun[c.field]} — pick the correct one:</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">${optsHtml}</div>
+            </div>`;
+          }).join('')}
+          <button class="btn-teal" style="width:100%;margin-top:8px" onclick="APP.applyNormalize()">Apply ${conflicts.length} correction${conflicts.length !== 1 ? 's' : ''} ›</button>
+        `;
+      },
+
+      normPick(i, value) {
+        if (!S.normChoices) S.normChoices = {};
+        S.normChoices[i] = value;
+        this.r_normalize();
+      },
+
+      applyNormalize() {
+        const conflicts = S.normConflicts || [];
+        if (conflicts.length === 0) return;
+        let changedCount = 0;
+        conflicts.forEach((c, i) => {
+          const chosen = S.normChoices[i];
+          if (chosen === undefined) return;
+          c.txnIds.forEach(id => {
+            _txnUpdate(id, t => {
+              if (c.field === 'bucket') {
+                const newBucket = chosen === '(unsorted)' ? null : chosen;
+                if (t.bucket === newBucket) return t;
+                changedCount++;
+                return { ...t, bucket: newBucket };
+              }
+              if (c.field === 'merchant') {
+                if (t.merchant === chosen) return t;
+                changedCount++;
+                return { ...t, merchant: chosen };
+              }
+              if (c.field === 'tag') {
+                const cur = (t.tags && t.tags[0]) || '(none)';
+                if (cur === chosen) return t;
+                changedCount++;
+                const rest = (t.tags || []).slice(1);
+                const newTags = chosen === '(none)' ? rest : [chosen, ...rest];
+                return { ...t, tags: newTags };
+              }
+              return t;
+            });
+          });
+        });
+        debouncedSave(D);
+        this.markUnsaved();
+        S.normChoices = {}; // fresh recommendation defaults on next run
+        toast(changedCount > 0 ? `✅ ${changedCount} record${changedCount !== 1 ? 's' : ''} updated` : 'Nothing to change');
+        this.r_normalize();
       },
 
       shareMonth() {
@@ -2616,6 +2746,7 @@
           <div class="act" onclick="APP.showAnnualWrap()" style="cursor:pointer"><div class="act-ic">🎉</div><div class="act-inf"><div class="act-t">See Annual Wrap 🎉</div><div class="act-s">Your year in rupees — beautiful summary</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.openMigrationWizard('settings')" style="cursor:pointer"><div class="act-ic">📱</div><div class="act-inf"><div class="act-t">Transfer to new device</div><div class="act-s">Move your data to another phone</div></div><div class="act-ar">›</div></div>
           <div class="act" onclick="APP.shareBlank()" style="cursor:pointer"><div class="act-ic">🎁</div><div class="act-inf"><div class="act-t">Share app with a friend</div><div class="act-s">Send a blank copy — no personal data</div></div><div class="act-ar">›</div></div>
+          <div class="act" onclick="APP.go('normalize')" style="cursor:pointer"><div class="act-ic">🧹</div><div class="act-inf"><div class="act-t">Normalize records</div><div class="act-s">Find spends classified inconsistently and fix them</div></div><div class="act-ar">›</div></div>
           <div class="txt-eyebrow-mist">STORAGE</div>
           <div class="tgl-row"><div class="tgl-inf"><div class="tgl-lbl">Monthly file sharding</div><div class="tgl-sub">Keeps main file lean — past months saved separately</div></div><button class="tgl${FLAGS.get('data_sharding') ? ' on' : ''}" id="tgl-shard" onclick="FLAGS.set('data_sharding',!FLAGS.get('data_sharding'));this.classList.toggle('on');toast(FLAGS.get('data_sharding')?'Sharding on — months saved separately':'Sharding off')"><div class="tgl-k"></div></button></div>
           <div style="border-top:1px solid var(--fog);margin:12px 0 8px"></div>
@@ -3477,6 +3608,118 @@
       }
       return prev[n];
     }
+    // ═══════════════════════════════════════════════════
+    // NORMALIZE — v6.4
+    // Finds records that SHOULD be treated the same but aren't:
+    // (1) same tag, different bucket (e.g. #coffee sometimes Necessary,
+    //     sometimes Comfortable — the user's own example)
+    // (2) same/near-identical merchant name, different bucket
+    // (3) near-identical merchant spelling (e.g. "Maiyya Coffee" vs
+    //     "Maiyas Coffee" — a typo, not two different places)
+    // Returns a flat list of conflict groups; nothing is written to D until
+    // the user reviews and confirms in r_normalize()/applyNormalize().
+    // ═══════════════════════════════════════════════════
+    function _normMerchantKey(s) { return (s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+
+    function _computeNormalizeConflicts() {
+      const txns = (D.transactions || []).filter(t => t.merchant);
+      const conflicts = [];
+
+      // ---- PASS 1: TAG GROUPS — same tag, different bucket ----
+      const byTag = {};
+      txns.forEach(t => {
+        (t.tags || []).forEach(tag => {
+          if (!byTag[tag]) byTag[tag] = [];
+          byTag[tag].push(t);
+        });
+      });
+      Object.entries(byTag).forEach(([tag, group]) => {
+        if (group.length < 2) return;
+        const bucketCounts = {};
+        group.forEach(t => { const b = t.bucket || '(unsorted)'; bucketCounts[b] = (bucketCounts[b] || 0) + 1; });
+        if (Object.keys(bucketCounts).length < 2) return; // all agree — not a conflict
+        const sorted = Object.entries(bucketCounts).sort((a, b) => b[1] - a[1]);
+        conflicts.push({
+          type: 'tag-bucket',
+          label: `#${tag}`,
+          field: 'bucket',
+          txnIds: group.map(t => t.id),
+          options: sorted.map(([v, c]) => ({ value: v, count: c })),
+          recommended: sorted[0][0]
+        });
+      });
+
+      // ---- PASS 2: MERCHANT FUZZY CLUSTERS ----
+      // Greedy clustering: same idea as _suggestMerchantName below, applied
+      // across the whole dataset instead of one freshly-typed name at a time.
+      const uniqueMerchants = [...new Set(txns.map(t => _normMerchantKey(t.merchant)))];
+      const clusters = [];
+      uniqueMerchants.forEach(name => {
+        let found = null;
+        for (const c of clusters) {
+          if (c.some(rep => rep === name || (_levenshtein(rep, name) <= 2 && Math.min(rep.length, name.length) > 3))) {
+            found = c; break;
+          }
+        }
+        if (found) found.push(name);
+        else clusters.push([name]);
+      });
+
+      clusters.forEach(reps => {
+        const members = txns.filter(t => reps.includes(_normMerchantKey(t.merchant)));
+        if (members.length < 2) return;
+
+        // (2a) spelling conflict — more than one distinct spelling in this cluster
+        const nameCounts = {};
+        members.forEach(t => { const nm = t.merchant.trim(); nameCounts[nm] = (nameCounts[nm] || 0) + 1; });
+        const distinctNames = Object.keys(nameCounts);
+        if (distinctNames.length > 1) {
+          const sorted = Object.entries(nameCounts).sort((a, b) => b[1] - a[1]);
+          conflicts.push({
+            type: 'merchant-name',
+            label: distinctNames.join(' / '),
+            field: 'merchant',
+            txnIds: members.map(t => t.id),
+            options: sorted.map(([v, c]) => ({ value: v, count: c })),
+            recommended: sorted[0][0]
+          });
+        }
+
+        // (2b) bucket conflict within this merchant cluster
+        const bucketCounts = {};
+        members.forEach(t => { const b = t.bucket || '(unsorted)'; bucketCounts[b] = (bucketCounts[b] || 0) + 1; });
+        if (Object.keys(bucketCounts).length > 1) {
+          const sorted = Object.entries(bucketCounts).sort((a, b) => b[1] - a[1]);
+          conflicts.push({
+            type: 'merchant-bucket',
+            label: distinctNames[0] || reps[0],
+            field: 'bucket',
+            txnIds: members.map(t => t.id),
+            options: sorted.map(([v, c]) => ({ value: v, count: c })),
+            recommended: sorted[0][0]
+          });
+        }
+
+        // (2c) tag conflict — using each record's first/primary tag as the
+        // representative value (keeps this simple rather than diffing full sets)
+        const tagCounts = {};
+        members.forEach(t => { const tg = (t.tags && t.tags[0]) || '(none)'; tagCounts[tg] = (tagCounts[tg] || 0) + 1; });
+        if (Object.keys(tagCounts).length > 1) {
+          const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
+          conflicts.push({
+            type: 'merchant-tag',
+            label: distinctNames[0] || reps[0],
+            field: 'tag',
+            txnIds: members.map(t => t.id),
+            options: sorted.map(([v, c]) => ({ value: v, count: c })),
+            recommended: sorted[0][0]
+          });
+        }
+      });
+
+      return conflicts;
+    }
+
     // Suggest a canonical merchant name for a freshly-typed one.
     // Ignores exact matches (distance 0) and merchants with < 3 uses (merchantNorm gotcha).
     function _suggestMerchantName(typed) {
@@ -4823,7 +5066,7 @@
         const monthStr = (S && S.monthOffset !== undefined) ? offsetMonthStr(S.monthOffset) : offsetMonthStr(0);
         APP.aiRenderStory(monthStr);
         APP.aiRenderMirror();
-        APP.aiRenderSpendTwin(monthStr);
+        if (typeof APP.aiRenderSpendTwin === 'function') APP.aiRenderSpendTwin(monthStr); // v6.5: was called unconditionally but never defined — crashed every Month-screen render. Spend Twin already works correctly via Insights' own card; this was a dangling hook from an incomplete second integration, not a missing feature.
         // FIX-5A: peek pattern — remove mask after first scroll
         const _mmBody = document.getElementById('mmBody');
         if (_mmBody) {
@@ -4979,7 +5222,7 @@
     // BUG-021: Swipe right to go back on sub-screens
     (function () {
       let sx = 0, sy = 0;
-      const BACK_SCREENS = { sort: 'home', slice: 'month', add: 'home', limits: 'home', settings: 'home' };
+      const BACK_SCREENS = { sort: 'home', slice: 'month', add: 'home', limits: 'home', settings: 'home', normalize: 'settings' };
       document.addEventListener('touchstart', e => { if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; } }, { passive: true });
       document.addEventListener('touchend', e => {
         if (!e.changedTouches.length) return;
