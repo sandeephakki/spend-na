@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.9
+  VERSION:        v6.11
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -21,8 +21,8 @@
                   js/* and break offline support for the rest of the app)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
-  SW_CACHE:       sn-v19
-  APP_VER (SW):   6.9 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
+  SW_CACHE:       sn-v21
+  APP_VER (SW):   6.11 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -924,12 +924,14 @@
         <!-- HOME -->
         <div class="scr" id="sHome">
           <div class="scr-body">
-            <!-- SECTION 1: AI tips + buckets, swipeable. Cards inject/hide themselves
-                 via JS same as before; buildHomeCarousel1() (called after each card's
-                 own render) collects whichever are visible + the 4 bucket cards into
-                 this strip, so it's never static — it reflects live data every time. -->
-            <div id="homeCarousel1" class="card-carousel"></div>
-            <div id="homeCarousel1Dots" class="carousel-dots"></div>
+            <!-- v6.10: ONE swipeable frame only (was 2 stacked carousels with separate
+                 dot rows — confusing). buildHomeCarousels() below assembles whichever
+                 of these actually have content, in order: AI tips, hero total, hints,
+                 then the 4 buckets — always live, nothing static. -->
+            <div class="home-frame">
+              <div id="homeCarousel1" class="card-carousel"></div>
+              <div id="homeCarousel1Dots" class="carousel-dots"></div>
+            </div>
             <div id="aiInsightCard" style="display:none" class="ai-insight-card">
               <div class="ai-insight-eyebrow">✨ AI INSIGHT</div>
               <div class="ai-insight-text" id="aiInsightText"></div>
@@ -958,9 +960,6 @@
               <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}APP.buildHomeCarousels();" style="margin-top:8px;font-size:11px;font-weight:700;color:#c2410c;background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
             </div>
             <div class="h-hero" id="hHero"></div>
-            <!-- SECTION 2: hints/highlights below the hero, swipeable -->
-            <div id="homeCarousel2" class="card-carousel" style="display:none"></div>
-            <div id="homeCarousel2Dots" class="carousel-dots"></div>
             <div class="h-body fade-up" id="hBody"></div>
           </div>
         </div>

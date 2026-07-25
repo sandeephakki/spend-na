@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.9';
+        const APP_VER = '6.11';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -2228,7 +2228,7 @@
           // deleting, so aiRenderX() can still find and update them later.
           [...c.children].forEach(ch => {
             if (sourceIds.includes(ch.id)) return;
-            if (ch.id && ch.id.indexOf('ai') === 0) { ch.style.display = 'none'; document.body.appendChild(ch); }
+            if (ch.id && (ch.id.indexOf('ai') === 0 || ch.id === 'hHero')) { ch.style.display = 'none'; document.body.appendChild(ch); }
             else ch.remove();
           });
           sourceIds.forEach(id => {
@@ -2250,7 +2250,11 @@
           };
         };
 
-        // Section 1: AI cards first, then the 4 bucket slides
+        // v6.10: ONE carousel only — was two stacked (Section 1 + Section 2),
+        // each with its own dot row, which read as confusing/broken (a lone
+        // dot appearing under the hero total for what looked like a 1-slide
+        // "carousel" of just itself). Order: AI cards → hero total → hints →
+        // the 4 buckets, all as slides in the same swipeable frame.
         const bucketSlideHost = document.getElementById('hBucketSlides');
         const bucketIds = [];
         if (bucketSlideHost) {
@@ -2260,11 +2264,6 @@
             bucketIds.push(id);
           });
         }
-        buildCarousel('homeCarousel1', 'homeCarousel1Dots', [
-          'aiInsightCard', 'aiForecastCard', 'aiPaydayCard', 'aiGuiltFreeCard', 'aiMonthEndCard', ...bucketIds
-        ]);
-
-        // Section 2: hints (weekly digest / pending-to-sort)
         const hintHost = document.getElementById('hHintSlides');
         const hintIds = [];
         if (hintHost) {
@@ -2274,7 +2273,10 @@
             hintIds.push(id);
           });
         }
-        buildCarousel('homeCarousel2', 'homeCarousel2Dots', hintIds);
+        buildCarousel('homeCarousel1', 'homeCarousel1Dots', [
+          'aiInsightCard', 'aiForecastCard', 'aiPaydayCard', 'aiGuiltFreeCard', 'aiMonthEndCard',
+          'hHero', ...hintIds, ...bucketIds
+        ]);
       },
 
       toggleInsightMonth(mon) {
@@ -2799,11 +2801,29 @@
       exportHTML() {
         const txns = D.transactions || [];
         if (txns.length === 0) { toast('No transactions to export yet'); return; }
-        const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0), month = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), sm = summary(offsetMonthStr(0)); // BUG-1
-        const rows = txns.map(t => { const cfg = t.bucket ? BUCKETS[t.bucket] : null; return `<tr><td>${t.date}</td><td><strong>${t.merchant}</strong></td><td style="text-align:right;font-weight:700">₹${t.amount.toLocaleString('en-IN')}</td><td style="text-align:center"><span style="background:${cfg ? cfg.cl : '#f1f5f9'};color:${cfg ? cfg.c : '#94a3b8'};font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px">${cfg ? cfg.l : '—'}</span></td></tr>`; }).join('');
+        const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0);
+        // v6.10: was `summary(offsetMonthStr(0))` — current-month-ONLY bucket totals —
+        // while `total`/`rows` below use ALL transactions. Dividing a one-month amount
+        // by an all-time total produced the wrong percentages (14%/7%/1%/0%, summing to
+        // ~22% instead of ~100%) and mislabeled the whole export "July 2026" even though
+        // it contained all 234 records, not just that month's ~94. summary() with no
+        // argument returns the all-time total, matching what `txns`/`total` actually are.
+        const sm = summary();
+        const grp = {};
+        txns.forEach(t => { const k = t.month || 'Unknown'; if (!grp[k]) grp[k] = []; grp[k].push(t); });
+        const monthKeys = Object.keys(grp).sort((a, b) => new Date('1 ' + b) - new Date('1 ' + a));
+        // v6.10: was one flat table of all 234 records with no month structure at all —
+        // now grouped by month (most recent first) with a subtotal row per month.
+        const rows = monthKeys.map(mon => {
+          const monthTxns = grp[mon];
+          const monthTotal = monthTxns.reduce((s, t) => s + t.amount, 0);
+          const hdrRow = `<tr><td colspan="4" style="background:#f8fafc;padding:12px 12px;font-weight:800;color:#0f172a;font-size:13px;border-bottom:2px solid #e2e8f0">${mon} <span style="float:right;color:#0ea5e9">₹${monthTotal.toLocaleString('en-IN')}</span></td></tr>`;
+          const txnRows = monthTxns.map(t => { const cfg = t.bucket ? BUCKETS[t.bucket] : null; return `<tr><td>${t.date}</td><td><strong>${t.merchant}</strong></td><td style="text-align:right;font-weight:700">₹${t.amount.toLocaleString('en-IN')}</td><td style="text-align:center"><span style="background:${cfg ? cfg.cl : '#f1f5f9'};color:${cfg ? cfg.c : '#94a3b8'};font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px">${cfg ? cfg.l : '—'}</span></td></tr>`; }).join('');
+          return hdrRow + txnRows;
+        }).join('');
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px"><div style="font-size:10px;color:${c.c};font-weight:700">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:4px">${pct}%</div></div>`; }).join('');
-        const html = _buildReportHtml({ eyebrow: 'HISTORY', title: month, amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} total records`, bCards, rows, txnCount: `All Transactions (${txns.length} total records)`, footerYear: '2026' });
-        const fname = `spend-na-history-${month.replace(/\s+/g, '-')}.html`;
+        const html = _buildReportHtml({ eyebrow: 'HISTORY', title: 'All History', amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} total records · ${monthKeys.length} month${monthKeys.length !== 1 ? 's' : ''}`, bCards, rows, txnCount: `All Transactions (${txns.length} total records)`, footerYear: '2026' });
+        const fname = `spend-na-all-history-${new Date().toISOString().slice(0,10)}.html`;
         const blob = new Blob([html], { type: 'text/html' });
         // BUG-8: use direct download only — navigator.share causes two files on iOS
         const u = URL.createObjectURL(blob), a = document.createElement('a');

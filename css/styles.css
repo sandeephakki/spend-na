@@ -1419,6 +1419,43 @@
       margin-bottom: 20px;
     }
     /* CARD CAROUSEL — v6.8, reusable swipeable strip (Home screen sections) */
+    /* HOME FRAME — v6.11: static outer frame around the swipeable carousel.
+       The frame is fixed (never moves/scrolls as a block); only its child
+       cards scroll left/right inside it. Sized to ~70% of Home's usable
+       content height so This Month / My Data can sit below as plain links,
+       not fight the frame for space. */
+    .home-frame {
+      height: 70vh;
+      max-height: 620px;
+      min-height: 320px;
+      border-radius: var(--rL);
+      background: var(--paper);
+      border: 1px solid var(--fog);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 4px;
+    }
+    .home-frame .card-carousel {
+      flex: 1;
+      min-height: 0;
+      margin: 0;
+      padding: 12px 12px 2px;
+      align-items: stretch;
+    }
+    .home-frame .card-carousel > * {
+      flex: 0 0 100%;
+      max-width: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow-y: auto;
+    }
+    .home-frame .carousel-dots {
+      margin: 0 0 10px;
+      flex-shrink: 0;
+    }
+
     .card-carousel {
       display: flex;
       gap: 10px;
