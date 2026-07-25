@@ -272,8 +272,16 @@
         position: relative;
         width: 420px;
         height: 820px;
-        max-height: 95vh;
+        max-height: 95vh; /* fallback for browsers without dvh support */
+        max-height: 95dvh; /* v6.6: vh is well-documented to misreport right after an
+                               orientation change on mobile Safari/Chrome (it can hold the
+                               PRE-rotation value, or include browser-chrome area that
+                               isn't actually visible) — dvh tracks the real, current
+                               visible viewport. Declared after vh so unsupporting
+                               browsers keep the vh fallback and supporting ones get the
+                               corrected value; same pattern used for max-width below. */
         max-width: calc(95vh * 420 / 820); /* keep 420:820 aspect ratio when height-constrained */
+        max-width: calc(95dvh * 420 / 820);
         min-width: 320px; /* v5.6: floor for very short landscape phones (e.g. 375px-tall
                               viewport → max-width would calc to ~180px, unreadably thin).
                               Below this the card trades aspect-ratio purity for a usable
@@ -300,7 +308,9 @@
         max-height: 95vh; /* v5.5 fix: this breakpoint had no height cap at all —
                               on a short-but-wide window the card was forced to
                               880px tall regardless of what actually fit on screen */
+        max-height: 95dvh; /* v6.6: see the 768px tier above for why dvh over vh */
         max-width: calc(95vh * 440 / 880); /* keep 440:880 aspect ratio when height-constrained */
+        max-width: calc(95dvh * 440 / 880);
       }
     }
 
@@ -1408,6 +1418,37 @@
       gap: 10px;
       margin-bottom: 20px;
     }
+    /* CARD CAROUSEL — v6.8, reusable swipeable strip (Home screen sections) */
+    .card-carousel {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      padding: 4px 16px 2px;
+      margin: 0 -16px;
+      scrollbar-width: none;
+    }
+    .card-carousel::-webkit-scrollbar { display: none; }
+    .card-carousel > * {
+      scroll-snap-align: center;
+      flex: 0 0 88%;
+      max-width: 360px;
+    }
+    .carousel-dots {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      margin: 6px 0 4px;
+    }
+    .carousel-dot {
+      width: 6px; height: 6px;
+      border-radius: 3px;
+      background: var(--fog);
+      transition: all .2s;
+    }
+    .carousel-dot.on { width: 16px; background: var(--teal); }
+
     .bc-hero {
       background: var(--glass-bg);
       backdrop-filter: var(--glass-blur);
@@ -2477,11 +2518,16 @@
       letter-spacing: .06em;
     }
 
-    /* Bucket badge colours */
-    .htxn-bkt-necessary  { background: rgba(52,211,153,.20);  color: #34d399; }
-    .htxn-bkt-committed  { background: rgba(129,140,248,.20); color: #a5b4fc; }
-    .htxn-bkt-comfortable{ background: rgba(251,191,36,.20);  color: #fbbf24; }
-    .htxn-bkt-luxury     { background: rgba(251,113,133,.20); color: #fb7185; }
+    /* Bucket badge colours — v6.7: was hardcoded bright hex (#34d399 etc.), designed
+       to read as bright accent text on a dark card. On light theme's now-solid-white
+       cards, that same bright/pastel text on a pastel background is low-contrast —
+       exactly the bug reported. var(--nec) etc. are already properly deepened for
+       light theme (this token system was built for v5.7's light theme rollout), so
+       swapping to them fixes contrast in both themes at once. */
+    .htxn-bkt-necessary  { background: rgba(52,211,153,.20);  color: var(--nec); }
+    .htxn-bkt-committed  { background: rgba(129,140,248,.20); color: var(--com); }
+    .htxn-bkt-comfortable{ background: rgba(251,191,36,.20);  color: var(--cft); }
+    .htxn-bkt-luxury     { background: rgba(251,113,133,.20); color: var(--lux); }
 
     .htxn-right {
       text-align: right;
@@ -3044,6 +3090,7 @@
       width: 100%;
       max-width: 480px;
       max-height: 85vh;
+      max-height: 85dvh; /* v6.6: see #app's 768px tier for why dvh over vh */
       overflow-y: auto;
       animation: mup .25s cubic-bezier(.32,0,.67,0);
     }
@@ -3122,7 +3169,7 @@
       background: rgba(var(--ink-rgb),.06);
       color: var(--slate);
     }
-    .mb-del { background: rgba(251,113,133,.18); color: #fb7185; border: 1px solid rgba(251,113,133,.30); }
+    .mb-del { background: rgba(251,113,133,.18); color: var(--lux); border: 1px solid rgba(251,113,133,.30); /* v6.7: was hardcoded #fb7185 */ }
 
     /* ═══════════════════════════════════════════════════
    TOAST
@@ -3365,7 +3412,7 @@
     .trust-forgot-title {
       font-size: 14px;
       font-weight: 800;
-      color: #fbbf24;
+      color: var(--cft); /* v6.7: was hardcoded #fbbf24 — low contrast on this box's light amber tint background */
       margin-bottom: 8px;
       display: flex;
       align-items: center;
@@ -3379,7 +3426,7 @@
     }
 
     .trust-forgot-text strong {
-      color: #fbbf24;
+      color: var(--cft); /* v6.7: was hardcoded #fbbf24 */
     }
 
     /* Owner note */
@@ -3405,7 +3452,7 @@
 
     .trust-owner-note-text strong {
       font-weight: 800;
-      color: #7dd3fc;
+      color: var(--teal); /* v6.7: was hardcoded #7dd3fc — low contrast on this box's light cyan tint background */
     }
 
     /* CTA */
@@ -3808,7 +3855,7 @@
       font-size: 10px;
       font-weight: 700;
       background: rgba(56,189,248,.18);
-      color: #7dd3fc;
+      color: var(--teal); /* v6.7: was hardcoded #7dd3fc — same low-contrast-on-light bug as bucket badges */
       border: 1px solid rgba(56,189,248,.30);
     }
 
@@ -3816,7 +3863,7 @@
       background: none;
       border: none;
       cursor: pointer;
-      color: #7dd3fc;
+      color: var(--teal); /* v6.7: was hardcoded #7dd3fc — same low-contrast bug as .tag-pill itself */
       font-size: 11px;
       padding: 0;
       line-height: 1;
@@ -4540,7 +4587,7 @@
   /* AI status / thinking */
   .ai-status{font-size:12px;color:var(--mist);padding:6px 16px 0;min-height:20px;font-style:italic}
   /* Voice indicator */
-  .ai-voice-ring{display:inline-block;width:36px;height:36px;border-radius:10px;background:rgba(248,113,113,.18);color:#f87171;border:1px solid rgba(248,113,113,.30);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
+  .ai-voice-ring{display:inline-block;width:36px;height:36px;border-radius:10px;background:rgba(248,113,113,.18);color:var(--err);border:1px solid rgba(248,113,113,.30);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
   .ai-voice-ring.recording{background:#ef4444;color:#fff;animation:pulse 1s infinite}
   /* Photo scan */
 
@@ -4559,8 +4606,8 @@
   .ai-story-text{font-size:13px;color:var(--ink);line-height:1.7}
   /* Honest Mirror card */
   .ai-mirror-card{margin:8px 16px 24px;background:rgba(251,191,36,.12);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:16px;padding:16px;border:1px solid rgba(251,191,36,.30)}
-  .ai-mirror-text{font-size:13px;color:#fbbf24;line-height:1.6;margin-bottom:10px}
-  .ai-mirror-btn{background:rgba(251,191,36,.25);color:#fbbf24;border:1px solid rgba(251,191,36,.40);border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--ff)}
+  .ai-mirror-text{font-size:13px;color:var(--cft);line-height:1.6;margin-bottom:10px}
+  .ai-mirror-btn{background:rgba(251,191,36,.25);color:var(--cft);border:1px solid rgba(251,191,36,.40);border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--ff)}
   /* Forecast card */
   .ai-forecast-card{margin:0 max(16px, var(--safe-r)) 14px max(16px, var(--safe-l));background:rgba(var(--ink-rgb),.08);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:16px;padding:14px 16px;border:1px solid var(--glass-border)}
   .ai-forecast-eyebrow{font-size:9px;font-weight:800;color:var(--mist);letter-spacing:2px;margin-bottom:6px}

@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.5';
+        const APP_VER = '6.9';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -833,7 +833,7 @@
             FLAGS.initExist();
             D = saved; this.launch();
           }
-        }, 1500);
+        }, 400);
       },
 
       togglePw(inId, eyeId) {
@@ -1615,6 +1615,7 @@
 
         document.getElementById('hBody').innerHTML = `
       ${_streakHTML}
+      <div id="hHintSlides" style="display:none">
       ${(() => { // WD-01: was defined but never wired into a render
         try {
           const dismissed = _safeGet('sn_weekly_digest_dismissed', '');
@@ -1622,7 +1623,7 @@
           if (dismissed === wk) return '';
           const digest = getWeeklyDigest();
           if (!digest) return '';
-          return `<button class="pend-btn" onclick="APP.go('history')" style="margin-bottom:8px;position:relative">
+          return `<button class="pend-btn" onclick="APP.go('history')" style="position:relative">
             <div class="p-dot" style="background:var(--teal)"></div>
             <div class="p-info"><div class="p-t">📊 Weekly digest</div><div class="p-s">${esc(digest)}</div></div>
             <span onclick="event.stopPropagation();localStorage.setItem('sn_weekly_digest_dismissed','${wk}');APP.r_home();" style="padding:2px 6px;color:var(--mist);font-size:14px">✕</span>
@@ -1630,15 +1631,11 @@
         } catch(e) { return ''; }
       })()}
       ${pend > 0 ? `<button class="pend-btn" onclick="APP.go('add')"><div class="p-dot"></div><div class="p-info"><div class="p-t">${pend} spend${pend > 1 ? 's' : ''} waiting to sort</div><div class="p-s">Tap to classify into buckets</div></div><div class="p-arr">›</div></button>` : ''}
+      </div>
       <div class="sec-row"><span class="sec-lbl">THIS MONTH</span><button class="sec-lnk" onclick="APP.go('limits')">Limits ›</button></div>
-      <div class="bgrid">
+      <div id="hBucketSlides" style="display:none">
         ${(() => {
-          const bktEntries = Object.entries(BUCKETS);
-          const topBkt = bktEntries.reduce((best,[k]) => {
-            return (sm[k]||0) > (sm[best]||0) ? k : best;
-          }, bktEntries[0][0]);
-
-          const renderHero = ([k, cfg]) => {
+          const renderSlide = ([k, cfg]) => {
             const amt = sm[k]||0, limit = lim[k]||0;
             const isOver = limit>0 && amt>limit;
             const isNear = limit>0 && amt>=limit*.8 && !isOver;
@@ -1654,22 +1651,7 @@
               </div>
             </div>`;
           };
-
-          const renderCompact = ([k, cfg]) => {
-            const amt = sm[k]||0, limit = lim[k]||0;
-            const isOver = limit>0 && amt>limit;
-            const col = isOver ? '#ef4444' : cfg.c;
-            return `<div class="bc-compact${isOver?' over':''}" onclick="APP.go('month')">
-              <div class="bc-top" style="background:${col}"></div>
-              <div class="bc-ic" style="background:${cfg.cl};color:${cfg.c};border-color:${cfg.cm}">${cfg.g}</div>
-              <div class="bc-amt" style="color:${col}">${fmt(amt)}</div>
-              <div class="bc-nm">${cfg.l}</div>
-            </div>`;
-          };
-
-          const heroHTML = renderHero([topBkt, BUCKETS[topBkt]]);
-          const compactHTML = bktEntries.filter(([k]) => k !== topBkt).map(renderCompact).join('');
-          return heroHTML + `<div class="bc-compact-row">${compactHTML}</div>`;
+          return Object.entries(BUCKETS).map(renderSlide).join('');
         })()}
       </div>
       <div class="sec-row" style="margin-top:4px"><span class="sec-lbl">MY DATA</span><button class="sec-lnk" onclick="APP.go('history')">All history ›</button></div>
@@ -1919,20 +1901,6 @@
         </div>
       </div>` : ''}
 
-      <!-- SPENDING BY TAG — only shown when tagged transactions exist (UI-039) -->
-      ${tagEntries.length > 0 ? `
-      <div class="tag-sum-card">
-        <div class="ins-card-title">SPENDING BY TAG</div>
-        ${tagEntries.map(([tag, amt]) => `
-          <div class="tag-sum-row">
-            <div>
-              <div class="tag-sum-name">#${esc(tag)}</div>
-              <div class="tag-sum-count">${tagCounts[tag]} transaction${tagCounts[tag] !== 1 ? 's' : ''}</div>
-            </div>
-            <div class="tag-sum-amt">${fmtF(amt)}</div>
-          </div>`).join('')}
-      </div>` : ''}
-
       <!-- CATEGORY CREEP (v5.0) -->
       ${(() => {
         try {
@@ -1979,7 +1947,7 @@
         const monthKeys = Object.keys(grp).sort((a, b) => new Date('1 ' + b) - new Date('1 ' + a)); // most recent first
         if (!S.insExpanded) S.insExpanded = {};
 
-        const monthSections = monthKeys.map(mon => {
+        const renderMonthSection = (mon) => {
           const monthTxns = grp[mon];
           const isCurrentMonth = mon === nowShort;
           const expanded = S.insExpanded[mon] !== undefined ? S.insExpanded[mon] : isCurrentMonth;
@@ -1995,7 +1963,36 @@
               ${this._renderInsightMonthCards(monthTxns, mon)}
             </div>
           </div>`;
-        }).join('');
+        };
+
+        // v6.6: same year-wise accumulation as History — only when data spans
+        // more than one year; single-year data renders identically to before.
+        const yearOfMon = (mon) => (mon.match(/\d{4}/) || [String(new Date().getFullYear())])[0];
+        const distinctYears = new Set(monthKeys.map(yearOfMon));
+        let monthSections;
+        if (distinctYears.size > 1) {
+          if (!S.insYearExpanded) S.insYearExpanded = {};
+          const byYear = {};
+          monthKeys.forEach(mon => { const y = yearOfMon(mon); if (!byYear[y]) byYear[y] = []; byYear[y].push(mon); });
+          const nowYear = String(new Date().getFullYear());
+          monthSections = Object.keys(byYear).sort((a,b) => b - a).map(year => {
+            const monthsInYear = byYear[year];
+            const yearTotal = monthsInYear.reduce((s, mon) => s + grp[mon].reduce((s2,t)=>s2+t.amount,0), 0);
+            const expanded = S.insYearExpanded[year] !== undefined ? S.insYearExpanded[year] : (year === nowYear);
+            const arrow = expanded ? '▾' : '▸';
+            return `<div>
+              <div class="mgrp-hdr" onclick="APP.toggleInsightYear('${year}')" style="cursor:pointer;user-select:none;background:var(--paper);border:1px solid var(--fog);border-radius:var(--r);padding:10px 14px;margin-bottom:8px">
+                <div class="mgrp-nm" style="font-size:15px;font-weight:800"><span id="insygrp-arrow-${year}" style="margin-right:6px;font-size:13px">${arrow}</span>${year}</div>
+                <div class="mgrp-tot" style="font-size:15px">${fmtF(yearTotal)}</div>
+              </div>
+              <div id="insygrp-body-${year}" style="display:${expanded?'':'none'};padding-left:4px">
+                ${monthsInYear.map(renderMonthSection).join('')}
+              </div>
+            </div>`;
+          }).join('');
+        } else {
+          monthSections = monthKeys.map(renderMonthSection).join('');
+        }
 
         body.innerHTML = overviewHtml +
           `<div style="margin:20px 0 8px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--mist);text-transform:uppercase">Month by month</div>` +
@@ -2005,6 +2002,18 @@
         <div style="font-size:11px;color:var(--mist);line-height:1.8">Insights are based on your sorted transactions.<br>Sort more spends for sharper patterns.</div>
       </div>`;
       },
+
+      // v6.6: year toggle for Insights (mirrors toggleYearGroup in History)
+      toggleInsightYear(year) {
+        if (!S.insYearExpanded) S.insYearExpanded = {};
+        S.insYearExpanded[year] = !(S.insYearExpanded[year] !== undefined ? S.insYearExpanded[year] : (year === String(new Date().getFullYear())));
+        const body = document.getElementById('insygrp-body-' + year);
+        const arrow = document.getElementById('insygrp-arrow-' + year);
+        if (body) body.style.display = S.insYearExpanded[year] ? '' : 'none';
+        if (arrow) arrow.textContent = S.insYearExpanded[year] ? '▾' : '▸';
+      },
+
+
 
       // One month's worth of personality/sharp-insight/stats/buckets/top+week/
       // day-of-week cards — same computations the old all-time r_insights did,
@@ -2118,6 +2127,37 @@
         ${nearLimit.length > 0 && overLimit.length === 0 ? `<div style="background:var(--cftL);border-radius:var(--r);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--cft);font-weight:600">⚡ Near limit: ${nearLimit.map(([k]) => BUCKETS[k].l).join(', ')}</div>` : ''}
       </div>
 
+      ${(() => {
+        const tagTotals = {}, tagCounts = {};
+        txns.forEach(t => {
+          if (!(Number(t.amount) > 0)) return;
+          (t.tags || []).forEach(tag => {
+            tagTotals[tag] = (tagTotals[tag] || 0) + Number(t.amount);
+            tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+          });
+        });
+        const entries = Object.entries(tagTotals).sort((a,b) => b[1]-a[1]);
+        if (entries.length === 0) return '';
+        const safeKey = monthLabel.replace(/\s+/g,'-');
+        const expanded = S.insTagExpanded && S.insTagExpanded[monthLabel];
+        return `<div class="tag-sum-card" style="margin-bottom:12px">
+          <div class="ins-card-title" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="APP.toggleInsightMonthTags('${esc(monthLabel)}')">
+            <span>SPENDING BY TAG</span>
+            <span id="instag-arrow-${safeKey}" style="font-size:12px">${expanded ? '▾' : '▸'}</span>
+          </div>
+          <div id="instag-body-${safeKey}" style="display:${expanded ? '' : 'none'}">
+            ${entries.map(([tag, amt]) => `
+              <div class="tag-sum-row">
+                <div>
+                  <div class="tag-sum-name">#${esc(tag)}</div>
+                  <div class="tag-sum-count">${tagCounts[tag]} transaction${tagCounts[tag] !== 1 ? 's' : ''}</div>
+                </div>
+                <div class="tag-sum-amt">${fmtF(amt)}</div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+      })()}
+
       <div class="ins-stat-row">
         <div class="ins-stat">
           <div style="font-size:20px;margin-bottom:4px">${topCfg.g}</div>
@@ -2163,6 +2203,80 @@
     `;
       },
 
+      // v6.8: HOME SCREEN 3-SECTION REDESIGN
+      // Section 1 = AI tip cards + bucket cards, swipeable.
+      // Section 2 = weekly-digest/pending-to-sort hints, swipeable.
+      // Section 3 = MY DATA (source indicator), swipeable.
+      // Rebuilt from scratch on every r_home() call — nothing here is static;
+      // whichever AI cards have content that render cycle (aiRenderInsight etc.
+      // already decide display:none vs visible from live data) is what shows up,
+      // and cards with nothing to say are skipped entirely rather than shown empty.
+      buildHomeCarousels() {
+        const buildCarousel = (containerId, dotsId, sourceIds) => {
+          const c = document.getElementById(containerId);
+          const dots = document.getElementById(dotsId);
+          if (!c) return;
+          // v6.8 fix: was c.innerHTML = '' here — fine on the very first render
+          // (container empty), but DESTROYS nodes on every render after that,
+          // because by then the AI card elements (aiInsightCard etc.) are living
+          // INSIDE this same container from the previous cycle — innerHTML=''
+          // doesn't just detach children, it deletes them, so getElementById()
+          // for those ids returned null from the second Home render onward.
+          // Fix: only remove children NOT in this cycle's sourceIds. Bucket/hint
+          // slides are freshly recreated every r_home() anyway (safe to discard);
+          // AI cards are persistent singletons — park them hidden instead of
+          // deleting, so aiRenderX() can still find and update them later.
+          [...c.children].forEach(ch => {
+            if (sourceIds.includes(ch.id)) return;
+            if (ch.id && ch.id.indexOf('ai') === 0) { ch.style.display = 'none'; document.body.appendChild(ch); }
+            else ch.remove();
+          });
+          sourceIds.forEach(id => {
+            const src = document.getElementById(id);
+            if (!src) return;
+            if (src.style.display === 'none') return;
+            // move the actual node (not a clone) so its own onclick handlers,
+            // ids, and later APP.aiRenderX() updates keep working untouched
+            src.style.margin = '0';
+            c.appendChild(src);
+          });
+          const n = c.children.length;
+          if (dots) dots.innerHTML = n > 1 ? Array.from({length:n}, (_,i) => `<div class="carousel-dot${i===0?' on':''}"></div>`).join('') : '';
+          c.style.display = n > 0 ? 'flex' : 'none';
+          c.onscroll = () => {
+            if (!dots || n <= 1) return;
+            const idx = Math.round(c.scrollLeft / (c.clientWidth * 0.9));
+            [...dots.children].forEach((d,i) => d.classList.toggle('on', i === Math.min(idx, n-1)));
+          };
+        };
+
+        // Section 1: AI cards first, then the 4 bucket slides
+        const bucketSlideHost = document.getElementById('hBucketSlides');
+        const bucketIds = [];
+        if (bucketSlideHost) {
+          [...bucketSlideHost.children].forEach((child, i) => {
+            const id = 'hBucketSlide' + i;
+            child.id = id;
+            bucketIds.push(id);
+          });
+        }
+        buildCarousel('homeCarousel1', 'homeCarousel1Dots', [
+          'aiInsightCard', 'aiForecastCard', 'aiPaydayCard', 'aiGuiltFreeCard', 'aiMonthEndCard', ...bucketIds
+        ]);
+
+        // Section 2: hints (weekly digest / pending-to-sort)
+        const hintHost = document.getElementById('hHintSlides');
+        const hintIds = [];
+        if (hintHost) {
+          [...hintHost.children].forEach((child, i) => {
+            const id = 'hHintSlide' + i;
+            child.id = id;
+            hintIds.push(id);
+          });
+        }
+        buildCarousel('homeCarousel2', 'homeCarousel2Dots', hintIds);
+      },
+
       toggleInsightMonth(mon) {
         if (!S.insExpanded) S.insExpanded = {};
         const nowKey = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
@@ -2172,6 +2286,15 @@
         const a = document.getElementById('insgrp-arrow-' + safeKey);
         if (b) b.style.display = S.insExpanded[mon] ? '' : 'none';
         if (a) a.textContent = S.insExpanded[mon] ? '▾' : '▸';
+      },
+      toggleInsightMonthTags(mon) {
+        if (!S.insTagExpanded) S.insTagExpanded = {};
+        S.insTagExpanded[mon] = !S.insTagExpanded[mon];
+        const safeKey = mon.replace(/\s+/g, '-');
+        const b = document.getElementById('instag-body-' + safeKey);
+        const a = document.getElementById('instag-arrow-' + safeKey);
+        if (b) b.style.display = S.insTagExpanded[mon] ? '' : 'none';
+        if (a) a.textContent = S.insTagExpanded[mon] ? '▾' : '▸';
       },
 
       // ── NORMALIZE (v6.4) ──
@@ -2347,17 +2470,23 @@
         const fbar = document.getElementById('fBar');
         if (!fbar.hasChildNodes()) {
           const allUsedTags = [...new Set((D.transactions || []).flatMap(t => t.tags || []))].sort();
+          const activeTagFilter = S.histF && S.histF.startsWith('tag:') ? S.histF.slice(4) : null;
           const pills = [
             { k: null, l: 'All' },
             ...Object.entries(BUCKETS).map(([k, v]) => ({ k, l: v.l })),
-            ...allUsedTags.map(tag => ({ k: `tag:${tag}`, l: `#${tag}` }))
           ];
-          fbar.innerHTML = pills.map(p => {
+          const pillsHTML = pills.map(p => {
             const on = S.histF === p.k;
-            const cfg = p.k && !p.k.startsWith('tag:') && BUCKETS[p.k];
-            const isTag = p.k && p.k.startsWith('tag:');
-            return `<button class="fp${on ? ' on' : ''}${isTag ? ' tag-fp' : ''}" style="${on ? (cfg ? `border-color:${cfg.c};background:${cfg.c}` : isTag ? `border-color:var(--teal);background:var(--teal)` : `border-color:var(--teal);background:var(--teal)`) : ''}" data-filterkey="${esc(p.k || '')}">${esc(p.l)}</button>`;
+            const cfg = p.k && BUCKETS[p.k];
+            return `<button class="fp${on ? ' on' : ''}" style="${on ? (cfg ? `border-color:${cfg.c};background:${cfg.c}` : `border-color:var(--teal);background:var(--teal)`) : ''}" data-filterkey="${esc(p.k || '')}">${esc(p.l)}</button>`;
           }).join('');
+          // v6.8: was one .fp pill PER DISTINCT TAG (17+ in real usage) crammed into
+          // this same horizontal strip — replaced with a single "Tags" button that
+          // opens a picker (APP.openTagPicker) instead of always showing every tag.
+          const tagBtnHTML = allUsedTags.length > 0
+            ? `<button class="fp tag-fp${activeTagFilter ? ' on' : ''}" style="${activeTagFilter ? 'border-color:var(--teal);background:var(--teal)' : ''}" onclick="APP.openTagPicker()">🏷️ ${activeTagFilter ? '#' + esc(activeTagFilter) : 'Tags'}</button>`
+            : '';
+          fbar.innerHTML = pillsHTML + tagBtnHTML;
         }
 
         const q = (document.getElementById('srchIn')?.value || '').toLowerCase();
@@ -2372,6 +2501,14 @@
 
         const grp = {}; filt.forEach(t => { const k = t.month || 'Unknown'; if (!grp[k]) grp[k] = []; grp[k].push(t); });
         const listEl = document.getElementById('histList');
+
+        // v6.6: year-wise accumulation. Only kicks in when data actually spans
+        // more than one year — for the common single-year case this renders
+        // identically to before (months only, no redundant year wrapper).
+        const yearOf = (mon) => (mon.match(/\d{4}/) || [String(new Date().getFullYear())])[0];
+        const distinctYears = new Set(Object.keys(grp).map(yearOf));
+        const showYearGroups = distinctYears.size > 1;
+        if (!S.histYearExpanded) S.histYearExpanded = {};
 
         // IMP-1: sort bar HTML
         const sortBar = `<div style="display:flex;gap:8px;padding:0 0 12px">
@@ -2444,7 +2581,7 @@
             </div>`;
         };
 
-        listEl.innerHTML = sortBar + Object.entries(grp).map(([mon, items]) => {
+        const renderMonthGroup = (mon, items) => {
           const grpTotal = items.reduce((s,t)=>s+t.amount,0);
           const safeKey = mon.replace(/\s+/g,'-');
           const isCurrentMonth = mon === nowMonKey;
@@ -2466,10 +2603,41 @@
               ${displayItems.map(txnCard).join('')}
             </div>
           </div>`;
-        }).join('');
+        };
+
+        const sortedMonthKeys = Object.keys(grp).sort((a, b) => new Date('1 ' + b) - new Date('1 ' + a));
+
+        let bodyHtml;
+        if (showYearGroups) {
+          const byYear = {};
+          sortedMonthKeys.forEach(mon => { const y = yearOf(mon); if (!byYear[y]) byYear[y] = []; byYear[y].push(mon); });
+          const nowYear = String(new Date().getFullYear());
+          bodyHtml = Object.keys(byYear).sort((a,b) => b - a).map(year => {
+            const monthsInYear = byYear[year];
+            const yearTotal = monthsInYear.reduce((s, mon) => s + grp[mon].reduce((s2,t)=>s2+t.amount,0), 0);
+            const expanded = S.histYearExpanded[year] !== undefined ? S.histYearExpanded[year] : (year === nowYear);
+            const arrow = expanded ? '\u25be' : '\u25b8';
+            return `<div>
+              <div class="mgrp-hdr" onclick="APP.toggleYearGroup('${year}')" style="cursor:pointer;user-select:none;background:var(--paper);border:1px solid var(--fog);border-radius:var(--r);padding:10px 14px;margin-bottom:8px">
+                <div class="mgrp-nm" style="font-size:15px;font-weight:800"><span id="ygrp-arrow-${year}" style="margin-right:6px;font-size:13px">${arrow}</span>${year}</div>
+                <div class="mgrp-tot" style="font-size:15px">${fmtF(yearTotal)}</div>
+              </div>
+              <div id="ygrp-body-${year}" style="display:${expanded?'':'none'};padding-left:4px">
+                ${monthsInYear.map(mon => renderMonthGroup(mon, grp[mon])).join('')}
+              </div>
+            </div>`;
+          }).join('');
+        } else {
+          bodyHtml = sortedMonthKeys.map(mon => renderMonthGroup(mon, grp[mon])).join('');
+        }
+
+        listEl.innerHTML = sortBar + bodyHtml;
 
         // BUG-7: re-attach filter pill listeners
-        document.getElementById('fBar').querySelectorAll('.fp').forEach(function(btn) {
+        // v6.8: excludes .tag-fp — that button has its own onclick (opens the tag
+        // picker) and doesn't carry a data-filterkey, so it shouldn't also get
+        // APP.setHF wired to it.
+        document.getElementById('fBar').querySelectorAll('.fp:not(.tag-fp)').forEach(function(btn) {
           btn.addEventListener('click', function() { APP.setHF(btn.dataset.filterkey); });
         });
         // FIX-6C: swipe gestures — HR-03: cleanup old listeners before re-attaching
@@ -2504,6 +2672,92 @@
         if (body) body.style.display = S.histExpanded[mon] ? '' : 'none';
         if (arrow) arrow.textContent = S.histExpanded[mon] ? '\u25be' : '\u25b8';
       },
+      // v6.6: year-wise accumulation toggle (only ever rendered when data spans 2+ years)
+      toggleYearGroup(year) {
+        if (!S.histYearExpanded) S.histYearExpanded = {};
+        S.histYearExpanded[year] = !(S.histYearExpanded[year] !== undefined ? S.histYearExpanded[year] : (year === String(new Date().getFullYear())));
+        const body = document.getElementById('ygrp-body-' + year);
+        const arrow = document.getElementById('ygrp-arrow-' + year);
+        if (body) body.style.display = S.histYearExpanded[year] ? '' : 'none';
+        if (arrow) arrow.textContent = S.histYearExpanded[year] ? '\u25be' : '\u25b8';
+      },
+      // v6.8: was called on every filter-pill click but never defined anywhere —
+      // clicking Necessary/Committed/Comfortable/Luxury/All in History threw and did
+      // nothing. Same toggle behavior implied by the existing "tap again to clear"
+      // hint text already in the History header and by how S.histF is consumed
+      // in r_history's filter logic.
+      setHF(key) {
+        S.histF = (S.histF === key) ? null : key;
+        document.getElementById('fBar').innerHTML = '';
+        this.r_history();
+      },
+
+      // v6.8: consolidates what used to be one .fp pill per distinct tag (17+ in
+      // real usage — the reported clutter) into a single button that opens this list.
+      openTagPicker() {
+        const txns = D.transactions || [];
+        const counts = {};
+        txns.forEach(t => (t.tags || []).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1; }));
+        const tags = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const activeTag = S.histF && S.histF.startsWith('tag:') ? S.histF.slice(4) : null;
+        const rows = tags.map(([tag, count]) => {
+          const on = tag === activeTag;
+          return `<button onclick="APP.setTagFilter('${esc(tag).replace(/'/g, "\\'")}')"
+            style="width:100%;display:flex;align-items:center;justify-content:space-between;
+            padding:12px 14px;margin-bottom:6px;border-radius:var(--r);border:1.5px solid ${on ? 'var(--teal)' : 'var(--fog)'};
+            background:${on ? 'var(--tealL)' : 'var(--paper)'};cursor:pointer;font-family:var(--ff);text-align:left">
+            <span style="font-size:14px;font-weight:700;color:${on ? 'var(--tealD)' : 'var(--ink)'}">#${esc(tag)}</span>
+            <span style="font-size:12px;color:var(--mist)">${count}</span>
+          </button>`;
+        }).join('');
+        const body = tags.length > 0
+          ? `<div style="max-height:50vh;overflow-y:auto;margin:4px 0 12px">${rows}</div>`
+          : `<div style="color:var(--slate);font-size:13px;padding:8px 0 16px">No tags used yet.</div>`;
+        modal('Filter by tag', body, [
+          ...(activeTag ? [{ l: 'Clear tag filter', c: 'mb-del', a: () => { S.histF = null; this.cm(); document.getElementById('fBar').innerHTML = ''; this.r_history(); } }] : []),
+          { l: 'Close', c: 'mb-nil', a: () => this.cm() }
+        ]);
+      },
+      setTagFilter(tag) {
+        S.histF = (S.histF === 'tag:' + tag) ? null : 'tag:' + tag;
+        this.cm();
+        document.getElementById('fBar').innerHTML = '';
+        this.r_history();
+      },
+
+      // v6.8: tag autocomplete under the History search box. Separate from the
+      // Tags picker modal (openTagPicker) — this suggests matches as you type
+      // rather than requiring a tap to open a full list.
+      showTagSuggest() {
+        const box = document.getElementById('tagSuggest');
+        const q = (document.getElementById('srchIn')?.value || '').trim().toLowerCase();
+        if (!box) return;
+        const counts = {};
+        (D.transactions || []).forEach(t => (t.tags || []).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1; }));
+        const allTags = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const matches = (q ? allTags.filter(([tag]) => tag.toLowerCase().includes(q)) : allTags).slice(0, 6);
+        if (matches.length === 0) { box.style.display = 'none'; return; }
+        box.innerHTML = matches.map(([tag, count]) =>
+          `<div onclick="APP.pickTagSuggest('${esc(tag).replace(/'/g, "\\'")}')"
+            style="padding:10px 14px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;border-bottom:1px solid var(--fog)">
+            <span style="color:var(--ink);font-weight:600">#${esc(tag)}</span>
+            <span style="color:var(--mist)">${count}</span>
+          </div>`
+        ).join('');
+        box.style.display = 'block';
+      },
+      hideTagSuggest() {
+        const box = document.getElementById('tagSuggest');
+        if (box) box.style.display = 'none';
+      },
+      pickTagSuggest(tag) {
+        document.getElementById('srchIn').value = '';
+        this.hideTagSuggest();
+        S.histF = 'tag:' + tag;
+        document.getElementById('fBar').innerHTML = '';
+        this.r_history();
+      },
+
       setHistSort(s) { S.histSort = s; this.r_history(); },
       tgEdit(id) { const el = document.getElementById('ie_' + id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
       hClassify(id, bkt) { _txnUpdate(id, { bucket: bkt }); debouncedSave(D); this.markUnsaved(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast(`→ ${BUCKETS[bkt].l}`); }, // HR-04
@@ -4266,21 +4520,27 @@
     function generateSpendTwin(currentMonthStr) {
       if (!getAIConfig().spendTwin) return null;
       const txns = D.transactions || [];
-      const currentTxns = txns.filter(t=>t.month===currentMonthStr);
-      if (currentTxns.length < 3) return null;
-      const current = {};
-      Object.keys(BUCKETS).forEach(k => { current[k] = currentTxns.filter(t=>t.bucket===k).reduce((s,t)=>s+t.amount,0); });
+      // single grouped pass instead of a filter() per month-per-bucket (was
+      // O(months x buckets x n), unbounded as account age grows — a 2-year
+      // history could mean 24 months x 4 buckets = 96 full-array scans here alone)
+      const byMonth = {};
+      txns.forEach(t => {
+        if (!byMonth[t.month]) byMonth[t.month] = {};
+        byMonth[t.month][t.bucket] = (byMonth[t.month][t.bucket] || 0) + t.amount;
+      });
+      const currentTxnsCount = txns.reduce((c,t) => c + (t.month === currentMonthStr ? 1 : 0), 0);
+      if (currentTxnsCount < 3) return null;
+      const current = byMonth[currentMonthStr] || {};
       const currentTotal = Object.values(current).reduce((s,v)=>s+v,0);
       if (currentTotal === 0) return null;
-      const pastMonths = [...new Set(txns.map(t=>t.month))].filter(m=>m!==currentMonthStr);
+      const pastMonths = Object.keys(byMonth).filter(m => m !== currentMonthStr);
       if (pastMonths.length < 2) return null;
       let bestMatch = null, bestScore = Infinity;
       pastMonths.forEach(m => {
-        const past = {};
-        Object.keys(BUCKETS).forEach(k => { past[k] = txns.filter(t=>t.month===m&&t.bucket===k).reduce((s,t)=>s+t.amount,0); });
+        const past = byMonth[m];
         const pastTotal = Object.values(past).reduce((s,v)=>s+v,0);
         if (pastTotal === 0) return;
-        const score = Object.keys(BUCKETS).reduce((s,k)=>s+Math.abs((currentTotal>0?current[k]/currentTotal:0)-(pastTotal>0?past[k]/pastTotal:0)),0);
+        const score = Object.keys(BUCKETS).reduce((s,k)=>s+Math.abs((currentTotal>0?(current[k]||0)/currentTotal:0)-(pastTotal>0?(past[k]||0)/pastTotal:0)),0);
         if (score < bestScore) { bestScore=score; bestMatch={month:m,total:pastTotal}; }
       });
       if (!bestMatch || bestScore > 0.45) return null;
@@ -5044,6 +5304,7 @@
       APP.aiRenderPayday();
       APP.aiRenderGuiltFree();
       APP.aiRenderMonthEnd();
+      APP.buildHomeCarousels();
     };
 
     // Hook r_add to reset AI smart add input

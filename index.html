@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.5
+  VERSION:        v6.9
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -21,8 +21,8 @@
                   js/* and break offline support for the rest of the app)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
-  SW_CACHE:       sn-v15
-  APP_VER (SW):   6.5 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
+  SW_CACHE:       sn-v19
+  APP_VER (SW):   6.9 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -450,6 +450,48 @@
                 correctly surfaced 41 real tag/merchant inconsistencies from their actual
                 history with sane majority recommendations (e.g. #coffee: 23 Comfortable
                 vs 2 Necessary).
+  v6.6          (a) LANDSCAPE, take 3: all 3 remaining plain-`vh` uses (#app's 768px and
+                1200px card-mode max-height/max-width, .m-box modal max-height) got a
+                `dvh` companion declared right after the `vh` line (fallback pattern —
+                unsupporting browsers keep the vh value, supporting ones get corrected).
+                Plain vh is well-documented to misreport on mobile Safari/Chrome right
+                after an orientation change (can hold the pre-rotation value, or include
+                browser-chrome area that isn't actually visible); dvh tracks the real
+                current viewport. Also audited: zero JS reads innerWidth/innerHeight/
+                getBoundingClientRect or listens for resize/orientationchange anywhere in
+                app.js — layout is 100% CSS-driven, so this was the only lever available;
+                safe-area handling was already correct (left/right via --safe-l/--safe-r
+                throughout, not just top/bottom, which is what landscape actually needs
+                for the notch/dynamic-island position). Cannot verify visually in this
+                environment — no real device/browser available — so if landscape still
+                looks wrong after this, the next thing to check is an actual DevTools
+                device-rotation recording, not more guessing from the CSS alone.
+                (b) YEAR-WISE ACCUMULATION: History and Insights both group by month
+                already (v6.4); now wrapped in a YEAR layer too — but ONLY rendered when
+                the data actually spans more than one year (Set of distinct years from
+                each month key > 1). Single-year data (everyone, today) renders byte-for-
+                byte identical to before — verified via headless test with the real data
+                (0 year headers) vs a synthetic backdated-half-to-2025 copy of the same
+                real data (2 year headers, correct per-year totals, correct default
+                expand state — current year open, past years collapsed, same convention
+                as the existing month-level expand/collapse). New state keys:
+                S.histYearExpanded / S.insYearExpanded (session-only, not persisted,
+                mirrors S.histExpanded / S.insExpanded).
+  v6.7          Same root cause as every prior contrast fix (v6.3/v6.5), a different
+                surface: bucket badges (.htxn-bkt-*), tag pills (.tag-pill,
+                .tag-pill-rm), and several onboarding/AI-feature callout boxes
+                (.trust-forgot-*, .trust-owner-note-text strong, .ai-voice-ring,
+                .ai-mirror-*) all used hardcoded bright hex text (#34d399, #fbbf24,
+                #7dd3fc, #f87171 etc.) — correct as bright accent-on-dark-glass in the
+                original design, low-contrast once their backgrounds became light
+                pastel tints. All swapped to the existing var(--nec)/--com/--cft/--lux/
+                --teal/--err tokens, which were already properly deepened for light
+                theme back in v5.7 — no new tokens needed, just routing through the
+                ones that already existed. Audited all remaining hardcoded bright-hex
+                `color:` declarations in the file afterward (2 left, both correct as-is:
+                .mw-url-text sits in a permanently-dark box like .mm-hero/#pgAnnualWrap,
+                and .sbn-action's base rule already has a [data-theme="light"] override
+                immediately following it from v6.2).
   env-config    v5.8: env-config.js detects local/QA/prod from location.hostname and
                 sets window.ENV = {name, label, debug, basePath, swPath, isProd}. MUST
                 load before app.js (it's first in <head>, before the theme bootstrap).
@@ -882,7 +924,12 @@
         <!-- HOME -->
         <div class="scr" id="sHome">
           <div class="scr-body">
-            <!-- AI cards injected by JS before hero -->
+            <!-- SECTION 1: AI tips + buckets, swipeable. Cards inject/hide themselves
+                 via JS same as before; buildHomeCarousel1() (called after each card's
+                 own render) collects whichever are visible + the 4 bucket cards into
+                 this strip, so it's never static — it reflects live data every time. -->
+            <div id="homeCarousel1" class="card-carousel"></div>
+            <div id="homeCarousel1Dots" class="carousel-dots"></div>
             <div id="aiInsightCard" style="display:none" class="ai-insight-card">
               <div class="ai-insight-eyebrow">✨ AI INSIGHT</div>
               <div class="ai-insight-text" id="aiInsightText"></div>
@@ -894,23 +941,26 @@
               <div class="ai-forecast-bar"><div class="ai-forecast-fill" id="aiForecastFill" style="width:0%"></div></div>
             </div>
             <!-- IMP-1: Payday Mode card -->
-            <div id="aiPaydayCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:var(--tealL);border:1.5px solid var(--tealM)">
+            <div id="aiPaydayCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:var(--tealL);border:1.5px solid var(--tealM)">
               <div style="font-size:10px;font-weight:700;color:var(--tealD);letter-spacing:1.5px;margin-bottom:6px">💰 PAYDAY MODE</div>
               <div id="aiPaydayText" style="font-size:14px;font-weight:700;color:var(--tealD)"></div>
               <div id="aiPaydaySub" style="font-size:12px;color:var(--teal);margin-top:3px"></div>
             </div>
             <!-- IMP-2: Guilt-Free Day card -->
-            <div id="aiGuiltFreeCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:#f0fdf4;border:1.5px solid #bbf7d0">
+            <div id="aiGuiltFreeCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:#f0fdf4;border:1.5px solid #bbf7d0">
               <div style="font-size:10px;font-weight:700;color:#15803d;letter-spacing:1.5px;margin-bottom:4px">🌿 GUILT-FREE STREAK</div>
               <div id="aiGuiltFreeText" style="font-size:14px;font-weight:700;color:#15803d"></div>
             </div>
             <!-- IMP-5: Month-End Warning card -->
-            <div id="aiMonthEndCard" style="display:none;margin:12px 16px 0;padding:14px 16px;border-radius:var(--r);background:#fff7ed;border:1.5px solid #fed7aa">
+            <div id="aiMonthEndCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:#fff7ed;border:1.5px solid #fed7aa">
               <div style="font-size:10px;font-weight:700;color:#c2410c;letter-spacing:1.5px;margin-bottom:6px">⚠️ MONTH-END CHECK</div>
               <div id="aiMonthEndText" style="font-size:13px;color:#9a3412;line-height:1.6"></div>
-              <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}" style="margin-top:8px;font-size:11px;font-weight:700;color:#c2410c;background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
+              <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}APP.buildHomeCarousels();" style="margin-top:8px;font-size:11px;font-weight:700;color:#c2410c;background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
             </div>
             <div class="h-hero" id="hHero"></div>
+            <!-- SECTION 2: hints/highlights below the hero, swipeable -->
+            <div id="homeCarousel2" class="card-carousel" style="display:none"></div>
+            <div id="homeCarousel2Dots" class="carousel-dots"></div>
             <div class="h-body fade-up" id="hBody"></div>
           </div>
         </div>
@@ -963,9 +1013,10 @@
               </div>
               <button class="exp-btn" onclick="APP.exportHTML()">Export ↑</button>
             </div>
-            <div class="srch">
-              <input class="srch-in" id="srchIn" inputmode="text" placeholder="Search..." oninput="rHistDebounced()">
-              <button class="srch-clr" onclick="document.getElementById('srchIn').value='';APP.rHist()">✕</button>
+            <div class="srch" style="position:relative">
+              <input class="srch-in" id="srchIn" inputmode="text" placeholder="Search..." oninput="rHistDebounced();APP.showTagSuggest()" onfocus="APP.showTagSuggest()" onblur="setTimeout(()=>APP.hideTagSuggest(),150)">
+              <button class="srch-clr" onclick="document.getElementById('srchIn').value='';APP.hideTagSuggest();APP.rHist()">✕</button>
+              <div id="tagSuggest" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--card);border:1px solid var(--fog);border-radius:var(--r);box-shadow:var(--shM);margin-top:4px;max-height:180px;overflow-y:auto"></div>
             </div>
             <div class="fbar" id="fBar"></div>
             <div id="filterNote" style="font-size:10px;color:var(--mist);padding:0 0 4px;display:none">One filter active
