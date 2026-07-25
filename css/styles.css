@@ -1425,7 +1425,7 @@
        content height so This Month / My Data can sit below as plain links,
        not fight the frame for space. */
     .home-frame {
-      height: 70vh;
+      height: 20vh;
       max-height: 620px;
       min-height: 320px;
       border-radius: var(--rL);
