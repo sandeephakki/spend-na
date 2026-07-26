@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.11';
+        const APP_VER = '6.12';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -1647,7 +1647,7 @@
                 <div class="bc-ic" style="background:${cfg.cl};color:${cfg.c};border-color:${cfg.cm}">${cfg.g}</div>
                 <div class="bc-amt" style="color:${col}">${fmtF(amt)}</div>
                 <div class="bc-nm">${cfg.l} ${isOver?'<span style="color:#ef4444;font-size:8px">● OVER LIMIT</span>':''}</div>
-                ${limit>0?`<div class="bc-pb" style="background:${cfg.cl}"><div class="bc-pf" style="background:${col};width:${pct}%"></div></div>`:''}
+                ${limit>0?`<div class="bc-pb" style="background:${cfg.cl}"><div class="bc-pf" style="background:${col};width:${pct}%"></div></div><div style="font-size:11px;color:var(--mist);margin-top:4px">of ${fmtF(limit)} · ${Math.round(pct)}%</div>`:`<div style="font-size:11px;color:var(--mist);margin-top:4px">No limit set</div>`}
               </div>
             </div>`;
           };
@@ -2275,7 +2275,7 @@
         }
         buildCarousel('homeCarousel1', 'homeCarousel1Dots', [
           'aiInsightCard', 'aiForecastCard', 'aiPaydayCard', 'aiGuiltFreeCard', 'aiMonthEndCard',
-          'hHero', ...hintIds, ...bucketIds
+          ...hintIds, ...bucketIds
         ]);
       },
 
