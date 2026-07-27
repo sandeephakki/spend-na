@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.12';
+        const APP_VER = '6.13';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -3420,6 +3420,26 @@
           };
           pillsEl.addEventListener('click', pillsEl._pillHandler);
         }
+        // v6.13: mirror the same removable pills into the AI confirm card, which
+        // is what voice/quick-add users actually see (the manual form with
+        // #addTagChips/#addTagSelected is collapsed by default).
+        const cfTagsRow = document.getElementById('aiCfTagsRow');
+        const cfTags = document.getElementById('aiCfTags');
+        if (cfTags && cfTagsRow) {
+          if (_addTags.length === 0) {
+            cfTagsRow.style.display = 'none';
+          } else {
+            cfTagsRow.style.display = 'flex';
+            cfTags.innerHTML = _addTags.map(tag => `<span class="tag-pill">#${esc(tag)}<button class="tag-pill-rm" data-tag="${esc(tag)}">✕</button></span>`).join('');
+            cfTags._pillHandler && cfTags.removeEventListener('click', cfTags._pillHandler);
+            cfTags._pillHandler = (e) => {
+              const btn = e.target.closest('.tag-pill-rm');
+              if (!btn) return;
+              APP.toggleAddTag(btn.dataset.tag);
+            };
+            cfTags.addEventListener('click', cfTags._pillHandler);
+          }
+        }
       },
 
       toggleAddTag(tag) {
@@ -4033,7 +4053,11 @@
 
         if (hay === needle) {
           confidence = 3; // exact match
-        } else if (hay.includes(needle) || needle.includes(hay)) {
+        } else if ((hay.includes(needle) || needle.includes(hay)) && Math.min(hay.length, needle.length) >= 4) {
+          // v6.13: added the length guard — without it, a short past merchant
+          // name (or a short voice-transcribed desc) could substring-match
+          // something completely unrelated purely by coincidence, and pull in
+          // that unrelated transaction's entire tag set along with it.
           confidence = 2; // substring match
         } else {
           // word overlap
@@ -4099,7 +4123,12 @@
         bkt = historyMatch.bkt;
         learnedFromHistory = true;
         historyInfo = historyMatch;
-        // Suggest tags from history match (dedupe, filter preset)
+        // v6.13: was `historyMatch.confidence >= 2` guard on the bucket only —
+        // tags were pulled in at ANY confidence including the loose word-overlap
+        // tier (confidence 1), which is exactly what let an unrelated past
+        // merchant's tags ride along (e.g. "coffee" overlapping a completely
+        // different transaction that also happened to contain that word).
+        // Tags now require the same >=2 (exact/substring) bar as the bucket.
         if (historyMatch.tags && historyMatch.tags.length > 0) {
           suggestedTags = [...new Set(historyMatch.tags)];
         }

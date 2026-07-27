@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.12
+  VERSION:        v6.13
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -21,8 +21,8 @@
                   js/* and break offline support for the rest of the app)
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
-  SW_CACHE:       sn-v22
-  APP_VER (SW):   6.12 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
+  SW_CACHE:       sn-v23
+  APP_VER (SW):   6.13 — bump this AND sw.js's APP_VER together on every release, or stale-SW toast never fires (NEW-002)
   LS_KEY:         sn_v4
 
 ════════════════════════════════════════════════════════════════
@@ -1071,6 +1071,15 @@
                 <span class="ai-confirm-label">DATE</span>
                 <span class="ai-confirm-value" id="aiCfDate">—</span>
                 <button class="ai-confirm-edit" onclick="APP.aiEditField('date')">Edit</button>
+              </div>
+              <!-- v6.13: was missing entirely — auto-suggested tags got applied and
+                   saved silently, with no way to see or fix a wrong one (e.g. a fuzzy
+                   merchant match pulling in an unrelated tag) unless you expanded
+                   "add manually" first, which most voice/quick-add users never do. -->
+              <div class="ai-confirm-row" id="aiCfTagsRow" style="display:none;align-items:flex-start">
+                <span class="ai-confirm-label" style="padding-top:2px">TAGS</span>
+                <div id="aiCfTags" style="flex:1;display:flex;flex-wrap:wrap;gap:4px"></div>
+                <button class="ai-confirm-edit" onclick="APP.aiToggleManual(true)">Edit</button>
               </div>
               <div class="ai-confirm-actions" style="display:flex;gap:8px;margin-top:10px">
                 <button class="ai-redo-btn" onclick="APP.aiRedoVoice()" style="flex:1;padding:9px;border-radius:var(--r);background:var(--paper);border:1.5px solid var(--fog);font-size:13px;font-weight:700;color:var(--slate);cursor:pointer;font-family:var(--ff)">🎤 Redo</button>
