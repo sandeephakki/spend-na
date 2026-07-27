@@ -1,5 +1,5 @@
-const C = 'sn-v23';
-const APP_VER = '6.13';
+const C = 'sn-v24';
+const APP_VER = '6.14';
 self.addEventListener('install', e => {
   // v5.8: was caches.open(C).then(c => c.add('/')) — an absolute '/' resolves
   // to the origin root, which is wrong under a GitHub Pages project subpath

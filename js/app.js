@@ -762,7 +762,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.13';
+        const APP_VER = '6.14';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -4759,6 +4759,17 @@
           if (btn) { btn.classList.remove('recording'); btn.textContent = '🎤'; }
           return;
         }
+        // v6.14: was possible to tap mic again before the browser had actually
+        // released it from the previous session (starting a new
+        // SpeechRecognition instance too soon after stopping one can silently
+        // misbehave or throw) — a short cooldown after the last session ended
+        // fixes the "second time doesn't work" symptom without being
+        // noticeable to a real user tapping normally.
+        const sinceLastEnd = Date.now() - (AI.voiceLastEndedAt || 0);
+        if (sinceLastEnd < 350) {
+          setTimeout(() => APP.aiVoiceToggle(), 350 - sinceLastEnd);
+          return;
+        }
         // Check API availability
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRec) {
@@ -4781,15 +4792,23 @@
           if (inp) inp.value = transcript;
           if (status) status.textContent = transcript ? '' : '🎤 Listening…';
           APP.aiAddParse(transcript);
+          // v6.14: was missing — mic kept listening for a few more seconds
+          // after the final transcript (waiting on the engine's own silence
+          // timeout) instead of stopping the instant recognition was done.
+          const last = e.results[e.results.length - 1];
+          if (last && last.isFinal) rec.stop();
         };
         rec.onerror = (e) => {
           AI.voiceActive = false;
+          AI.voiceLastEndedAt = Date.now();
           if (btn) { btn.classList.remove('recording'); btn.textContent = '🎤'; btn.setAttribute('aria-pressed', 'false'); }
           if (status) status.textContent = '';
           if (e.error === 'not-allowed') toast('Microphone permission denied');
         };
         rec.onend = () => {
           AI.voiceActive = false;
+          AI.voiceLastEndedAt = Date.now();
+          AI.voiceRec = null;
           if (btn) { btn.classList.remove('recording'); btn.textContent = '🎤'; }
           if (status) status.textContent = '';
         };
