@@ -10,18 +10,25 @@
 // index.html <head>) since app.js reads window.ENV.debug at boot and the
 // SW registration reads window.ENV.basePath.
 //
-// Configured for: QA = sandeephakki-qa.github.io/spend-na/,
-// Prod = sandeephakki.github.io/spend-na/ (both GitHub Pages project sites,
-// same repo name, two separate accounts). If either ever moves to a custom
-// domain, update its *_HOSTNAMES entry and set the matching *_PATH_PREFIX
-// to '/' (custom domains normally serve from root).
+// Configured for: QA = sandeephakki-qa.github.io/spend-na/ (GitHub Pages
+// project site). Prod = www.spendna.in (custom domain, added v6.15 — serves
+// from root) with sandeephakki.github.io/spend-na/ kept as a fallback prod
+// match in case the old URL is still reachable during DNS cutover — each
+// hostname maps to its OWN path prefix below since a custom domain and a
+// GitHub Pages project subpath need different values.
 // ═══════════════════════════════════════════════════
 (function () {
   var QA_HOSTNAMES = ['sandeephakki-qa.github.io'];
   var QA_PATH_PREFIX = '/spend-na/';
 
-  var PROD_HOSTNAMES = ['sandeephakki.github.io'];
-  var PROD_PATH_PREFIX = '/spend-na/';
+  // hostname -> path prefix (custom domains serve from root; a GitHub Pages
+  // project page serves from /<repo>/)
+  var PROD_HOSTS = {
+    'www.spendna.in': '/',
+    'spendna.in': '/',
+    'sandeephakki.github.io': '/spend-na/'
+  };
+  var PROD_HOSTNAMES = Object.keys(PROD_HOSTS);
   // ═══════════════════════════════════════════════════
 
   var host = location.hostname;
@@ -35,7 +42,7 @@
   } else if (isQA) {
     name = 'qa'; label = 'QA'; debug = true; basePath = QA_PATH_PREFIX;
   } else if (isProd) {
-    name = 'prod'; label = null; debug = false; basePath = PROD_PATH_PREFIX;
+    name = 'prod'; label = null; debug = false; basePath = PROD_HOSTS[host];
   } else {
     // Unrecognized host (e.g. a PR preview, a fork, someone's own clone) —
     // fail safe toward prod behavior (no debug noise, no stray ribbon) but

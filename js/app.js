@@ -513,6 +513,33 @@
     function normTxn(t) { if (!t || typeof t !== 'object') return { merchant:'Unknown', amount:0, bucket:null, source:null, tags:[], date:'', time:'', month:'' }; const amt = parseFloat(t.amount); return { ...t, merchant: (typeof t.merchant === 'string' && t.merchant.trim()) ? t.merchant.trim() : 'Unknown', amount: isFinite(amt) && amt >= 0 ? amt : 0, bucket: t.bucket || null, source: t.source || null, tags: Array.isArray(t.tags) ? t.tags : [], date: t.date || '', time: t.time || '', month: t.month || '' }; } // HR-02: hardened
     let _saveTimer; function debouncedSave(d, ms) { if (!d) return; ms = ms || 300; clearTimeout(_saveTimer); _saveTimer = setTimeout(function(){ try { DB.save(d); } catch(e) { console.error('[debouncedSave]', e); toast('⚠️ Save failed'); } }, ms); } // HR-04
     // ── TRANSACTION MUTATION HELPERS (DRY) ──────────────────
+    // v6.15: shared date parser for the free-text "e.g. 23 Mar" DATE field, used
+    // by both Add and Edit. Was previously two separate, both-broken attempts:
+    // Add hardcoded `date` to today regardless of this field, and its `month`
+    // parser required a 3-part "DD Mon YYYY" input the placeholder never asked
+    // for (so it silently fell back to today too). Edit's "Save Date" button
+    // called hSaveDate() — a function that didn't exist anywhere in the file.
+    // Accepts "23 Mar" or "23 Mar 2025"; infers the year when omitted (current
+    // year, unless that would be a future date — then previous year, so
+    // logging a December spend in early January doesn't land in the future).
+    function _parseDateInput(str) {
+      const now = new Date();
+      const fallback = { date: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }), month: now.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) };
+      const parts = (str || '').trim().split(/\s+/);
+      if (parts.length < 2) return fallback;
+      const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const day = parseInt(parts[0], 10);
+      const monIdx = mn.findIndex(m => m.toLowerCase() === (parts[1] || '').slice(0,3).toLowerCase());
+      if (!day || day < 1 || day > 31 || monIdx === -1) return fallback;
+      let year = parts[2] && /^\d{4}$/.test(parts[2]) ? parseInt(parts[2], 10) : now.getFullYear();
+      let candidate = new Date(year, monIdx, day, 12);
+      if (!parts[2] && candidate > now) { year -= 1; candidate = new Date(year, monIdx, day, 12); }
+      return {
+        date: `${String(day).padStart(2,'0')} ${mn[monIdx]}`,
+        month: `${mn[monIdx]} ${year}`
+      };
+    }
+
     function _txnUpdate(id, patch) {
       if (!id || !D || !Array.isArray(D.transactions)) { console.warn('[_txnUpdate] invalid args', id); return false; }
       let found = false;
@@ -762,7 +789,7 @@
         // Service worker — served as a real same-origin /sw.js file.
         // data: and blob: URIs are opaque-origin and fail SW registration per spec
         // on modern Chrome/Firefox — NEW-001 fix. APP_VER bumped to 5.4 — NEW-002 fix.
-        const APP_VER = '6.14';
+        const APP_VER = '6.15';
         if ('serviceWorker' in navigator) {
           try {
             // v5.8: was a hardcoded absolute '/sw.js' — broke under a GitHub Pages
@@ -1238,6 +1265,37 @@
       },
 
       // ── SAVE ──
+      // v6.15: "force save" — the app already auto-saves to this browser's
+      // localStorage on every add (debouncedSave), but that's useless if the
+      // browser/device changes, since local storage never leaves the device
+      // (see the trust screen promise) — the person's actual report was losing
+      // data across a browser change, which only a real EXPORT protects
+      // against. Counts records added since the last successful export
+      // (derived from timestamps vs sn_last_exported, not a separate counter
+      // that could drift out of sync) and interrupts with a modal — not just
+      // a dismissible toast — every 5th one. "Remind me later" postpones,
+      // it doesn't cancel; it reappears after 5 more records either way.
+      checkBackupReminder() {
+        try {
+          const txns = D.transactions || [];
+          const lastExp = localStorage.getItem('sn_last_exported');
+          const sinceCount = lastExp
+            ? txns.filter(t => t.timestamp && t.timestamp > lastExp).length
+            : txns.length;
+          if (sinceCount > 0 && sinceCount % 5 === 0) {
+            modal('💾 Back up your data', `
+              <div style="font-size:13px;color:var(--slate);line-height:1.6;margin-bottom:4px">
+                You've added <b style="color:var(--ink)">${sinceCount}</b> spend${sinceCount !== 1 ? 's' : ''} since your last backup.
+                This data only lives on this device — a new browser or a cleared cache won't have it unless you export a copy.
+              </div>
+            `, [
+              { l: 'Remind me in 5 more', c: 'mb-nil', a: () => this.cm() },
+              { l: 'Export backup now ↑', c: 'mb-ok', a: () => { this.cm(); this.exportZipFolder(); } },
+            ]);
+          }
+        } catch(e) { console.warn("[catch]", e); }
+      },
+
       markUnsaved() {
         S.unsaved = true;
         // Auto-save to localStorage silently — no UI disruption
@@ -2762,6 +2820,17 @@
 
       setHistSort(s) { S.histSort = s; this.r_history(); },
       tgEdit(id) { const el = document.getElementById('ie_' + id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
+      // v6.15: was called from the "Save Date" button but never defined anywhere —
+      // editing a transaction's date silently did nothing.
+      hSaveDate(id) {
+        const input = document.getElementById('ie-date-' + id);
+        const picked = _parseDateInput(input?.value);
+        _txnUpdate(id, { date: picked.date, month: picked.month });
+        debouncedSave(D); this.markUnsaved();
+        document.getElementById('fBar').innerHTML = '';
+        this.r_history();
+        toast(`Date → ${picked.date}`);
+      },
       hClassify(id, bkt) { _txnUpdate(id, { bucket: bkt }); debouncedSave(D); this.markUnsaved(); document.getElementById('fBar').innerHTML = ''; this.r_history(); toast(`→ ${BUCKETS[bkt].l}`); }, // HR-04
       hSaveDesc(id) {
         // FIX-7: save edited description from inline edit panel
@@ -2933,8 +3002,10 @@
         S.saveBusy = true;
         try {
           const now = new Date();
-          D.transactions = [{ id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: now.toISOString(), date: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }), time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), month: (function(){var d=(document.getElementById('addDate')?.value||'').trim().split(' ');var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return(d.length>=3&&mn.includes(d[1])&&d[2]&&d[2].length===4)?d[1]+' '+d[2]:now.toLocaleDateString('en-IN',{month:'short',year:'numeric'});})() /* BUG-15 */, merchant: desc || 'Manual Entry', amount: amt, bucket: S.addBkt, source: S.addSrc, tags: [..._addTags] }, ...(D.transactions || [])];
+          const picked = _parseDateInput(document.getElementById('addDate')?.value);
+          D.transactions = [{ id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: now.toISOString(), date: picked.date, time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), month: picked.month, merchant: desc || 'Manual Entry', amount: amt, bucket: S.addBkt, source: S.addSrc, tags: [..._addTags] }, ...(D.transactions || [])];
           DB.save(D); this.markUnsaved();
+          this.checkBackupReminder();
           _addTags = []; // clear after save — no stale tags on next open
           if (navigator.vibrate) navigator.vibrate(50);
           toast(`₹${amt.toLocaleString('en-IN')} → ${BUCKETS[S.addBkt].l}`);
@@ -4698,12 +4769,16 @@
         if (!p) { toast('Nothing to save yet'); return; }
         if (!p.amt || p.amt <= 0) { toast('Please enter an amount'); return; }
         const now = new Date();
+        // v6.15: was hardcoded to `now` regardless of p.date (set when OCR
+        // extracts a date from a receipt, or the manual-form date field is
+        // filled) — same bug as saveManual's Add flow, in the other save path.
+        const picked = p.date ? _parseDateInput(p.date) : { date: _fmtDate(now), month: _fmtMonth(now) };
         const txn = {
           id: _mkTxnId(),
           timestamp: now.toISOString(),
-          date: _fmtDate(now),
+          date: picked.date,
           time: _fmtTime(now),
-          month: _fmtMonth(now),
+          month: picked.month,
           merchant: p.desc || 'Spend',
           amount: p.amt,
           bucket: p.bkt,
@@ -4715,6 +4790,7 @@
         D.lastSrc = p.src;
         _invalidateMerchantIndex(); // MQ-03
         DB.save(D); this.markUnsaved();
+        this.checkBackupReminder();
         _addTags = [];
         if (navigator.vibrate) navigator.vibrate(50);
         // AI reaction toast
