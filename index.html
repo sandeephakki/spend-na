@@ -12,7 +12,7 @@
 
 1. IDENTITY
   APP:            Spend-na
-  VERSION:        v6.15
+  VERSION:        v6.16
   FILE:           index.html — companion files now organized into css/styles.css,
                   js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
                   icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
@@ -583,7 +583,10 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' cdnjs.cloudflare.com; worker-src blob: cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'none'; style-src 'self' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' cdnjs.cloudflare.com static.cloudflareinsights.com; worker-src blob: cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'self' cloudflareinsights.com; style-src 'self' 'unsafe-inline';">
+  <!-- Cloudflare Web Analytics -->
+  <script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "19d63287362e44e0b204686c3066e7f7"}'></script>
+  <!-- End Cloudflare Web Analytics -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <!-- v5.8: env-config MUST load first — theme bootstrap below and app.js both
        read window.ENV (debug flag, SW path). See env-config.js for the two
@@ -620,7 +623,6 @@
                        everyone else gets 'light' per the fallback above */ }
     })();
   </script>
-  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "19d63287362e44e0b204686c3066e7f7"}'></script><!-- End Cloudflare Web Analytics -->
   <link rel="stylesheet" href="css/styles.css">
 </head>
 
