@@ -1290,7 +1290,7 @@
               </div>
             `, [
               { l: 'Remind me in 5 more', c: 'mb-nil', a: () => this.cm() },
-              { l: 'Export backup now ↑', c: 'mb-ok', a: () => { this.cm(); this.exportZipFolder(); } },
+              { l: 'Export backup now ↑', c: 'mb-ok', a: () => { this.cm(); this.saveFile(); } },
             ]);
           }
         } catch(e) { console.warn("[catch]", e); }
