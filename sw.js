@@ -1,4 +1,4 @@
-const C = 'sn-v25';
+const C = 'sn-v27';
 const APP_VER = '6.15';
 self.addEventListener('install', e => {
   // v5.8: was caches.open(C).then(c => c.add('/')) — an absolute '/' resolves

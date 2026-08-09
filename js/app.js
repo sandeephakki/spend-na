@@ -532,8 +532,13 @@
       const monIdx = mn.findIndex(m => m.toLowerCase() === (parts[1] || '').slice(0,3).toLowerCase());
       if (!day || day < 1 || day > 31 || monIdx === -1) return fallback;
       let year = parts[2] && /^\d{4}$/.test(parts[2]) ? parseInt(parts[2], 10) : now.getFullYear();
-      let candidate = new Date(year, monIdx, day, 12);
-      if (!parts[2] && candidate > now) { year -= 1; candidate = new Date(year, monIdx, day, 12); }
+      // v6.19: was `candidate > now` — compared the full day+month date, so
+      // typing "9 Aug" on Aug 8 (one day ahead, same month) rolled all the way
+      // back to last year, same as a genuinely stale month like "Dec" typed in
+      // January should. Narrowed to only the month itself being unstarted this
+      // year — a same-month day being a little ahead of today is far more
+      // likely a same-day/near-today entry than a year off.
+      if (!parts[2] && monIdx > now.getMonth()) { year -= 1; }
       return {
         date: `${String(day).padStart(2,'0')} ${mn[monIdx]}`,
         month: `${mn[monIdx]} ${year}`
@@ -2868,8 +2873,25 @@
       hDel(id) { _confirmDelete(() => { _txnDelete(id); _commitSave('Deleted'); this.cm(); document.getElementById('fBar').innerHTML = ''; this.r_history(); }); },
 
       exportHTML() {
-        const txns = D.transactions || [];
-        if (txns.length === 0) { toast('No transactions to export yet'); return; }
+        const all = D.transactions || [];
+        // v6.18: was always D.transactions unfiltered — Export ignored whatever
+        // bucket/tag/search filter was currently applied on screen. Same filter
+        // predicate as r_history()'s own list, so the export matches what's
+        // actually visible when you tap Export.
+        const q = (document.getElementById('srchIn')?.value || '').toLowerCase();
+        const _searchTerms = typeof expandSearchQuery === 'function' ? expandSearchQuery(q) : [q].filter(Boolean);
+        const txns = all.filter(t => {
+          const ms = !q || _searchTerms.some(term => (t.merchant||'').toLowerCase().includes(term) || String(t.amount).includes(term));
+          const mb = S.histF == null ? true
+            : S.histF.startsWith('tag:') ? (t.tags || []).includes(S.histF.slice(4))
+                : t.bucket === S.histF;
+          return ms && mb;
+        });
+        if (txns.length === 0) { toast('No transactions match the current filter'); return; }
+        const filterLabel = S.histF == null ? null
+          : S.histF.startsWith('tag:') ? `#${S.histF.slice(4)}`
+              : BUCKETS[S.histF]?.l;
+        const reportTitle = filterLabel ? `History — ${filterLabel}` : 'All History';
         const total = txns.filter(t => t.bucket).reduce((s, t) => s + t.amount, 0);
         // v6.10: was `summary(offsetMonthStr(0))` — current-month-ONLY bucket totals —
         // while `total`/`rows` below use ALL transactions. Dividing a one-month amount
@@ -2877,7 +2899,12 @@
         // ~22% instead of ~100%) and mislabeled the whole export "July 2026" even though
         // it contained all 234 records, not just that month's ~94. summary() with no
         // argument returns the all-time total, matching what `txns`/`total` actually are.
-        const sm = summary();
+        // v6.18: sm now derived from the filtered set below (filtBTotals), not the
+        // unconditional all-time summary(), so a filtered export's bucket cards/
+        // percentages match the filtered total too.
+        const filtBTotals = {};
+        txns.forEach(t => { if (t.bucket) filtBTotals[t.bucket] = (filtBTotals[t.bucket] || 0) + t.amount; });
+        const sm = filtBTotals;
         const grp = {};
         txns.forEach(t => { const k = t.month || 'Unknown'; if (!grp[k]) grp[k] = []; grp[k].push(t); });
         const monthKeys = Object.keys(grp).sort((a, b) => new Date('1 ' + b) - new Date('1 ' + a));
@@ -2891,8 +2918,9 @@
           return hdrRow + txnRows;
         }).join('');
         const bCards = Object.entries(BUCKETS).map(([k, c]) => { const amt = sm[k] || 0, pct = total > 0 ? Math.round((amt / total) * 100) : 0; return `<div style="flex:1;min-width:120px;background:${c.cl};border-radius:12px;padding:14px"><div style="font-size:10px;color:${c.c};font-weight:700">${c.l.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${c.c};margin-top:6px">₹${amt.toLocaleString('en-IN')}</div><div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:4px">${pct}%</div></div>`; }).join('');
-        const html = _buildReportHtml({ eyebrow: 'HISTORY', title: 'All History', amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} total records · ${monthKeys.length} month${monthKeys.length !== 1 ? 's' : ''}`, bCards, rows, txnCount: `All Transactions (${txns.length} total records)`, footerYear: '2026' });
-        const fname = `spend-na-all-history-${new Date().toISOString().slice(0,10)}.html`;
+        const html = _buildReportHtml({ eyebrow: 'HISTORY', title: reportTitle, amount: total.toLocaleString('en-IN'), subtitle: `${txns.length} record${txns.length !== 1 ? 's' : ''} · ${monthKeys.length} month${monthKeys.length !== 1 ? 's' : ''}${filterLabel ? ' · filtered' : ''}`, bCards, rows, txnCount: `${filterLabel ? filterLabel + ' Transactions' : 'All Transactions'} (${txns.length} total records)`, footerYear: '2026' });
+        const fnameSuffix = filterLabel ? `-${filterLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : '-all-history';
+        const fname = `spend-na${fnameSuffix}-${new Date().toISOString().slice(0,10)}.html`;
         const blob = new Blob([html], { type: 'text/html' });
         // BUG-8: use direct download only — navigator.share causes two files on iOS
         const u = URL.createObjectURL(blob), a = document.createElement('a');
@@ -2900,7 +2928,7 @@
         document.body.appendChild(a); a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(u);
-        toast('History exported — beautiful HTML file saved ✓');
+        toast(filterLabel ? `${filterLabel} exported ✓` : 'History exported — beautiful HTML file saved ✓');
       },
 
       shareMonth() {
