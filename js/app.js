@@ -702,15 +702,27 @@
       cm() { document.getElementById('modal').classList.remove('on'); },
 
 
+      // ── KEYBOARD ACCESS ──
+      // Fires an element's onclick on Enter/Space — for role="button" divs that
+      // aren't real <button>s (backdrop-filter/flex layouts a <button> reset
+      // would fight). Prevents Space from scrolling the page.
+      a11yActivate(e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.currentTarget.click();
+      },
+
       // ── TRUST SCREEN ──
       toggleTrustAccordion() {
         const body = document.getElementById('trustDetails');
         const icon = document.getElementById('trustToggleIcon');
+        const toggle = document.getElementById('trustAccordion')?.querySelector('[role="button"]');
         if (!body || !icon) return;
         const isHidden = body.style.display === 'none' || body.style.display === '';
         body.style.display = isHidden ? 'flex' : 'none';
         body.style.flexDirection = 'column';
         icon.textContent = isHidden ? 'collapse' : 'expand';
+        if (toggle) toggle.setAttribute('aria-expanded', String(isHidden));
       },
 
       trustAccepted() {
@@ -1022,6 +1034,12 @@
         else if (p1 && p1.length < 4) { err.textContent = 'Minimum 4 characters'; ok = false; }
         else err.textContent = '';
         const cta = document.getElementById('obCta'); if (cta) { cta.disabled = !ok; cta.style.opacity = ok ? '1' : '.35'; }
+        // BUG-028: reflect section completion on the progress dots
+        const d0 = document.getElementById('obProgDot0'), d1 = document.getElementById('obProgDot1'), d2 = document.getElementById('obProgDot2');
+        const setDot = (el, num, done) => { if (!el) return; el.classList.toggle('done', done); el.textContent = done ? '✓' : num; };
+        setDot(d0, '1', nm.length > 1);
+        setDot(d1, '2', !!S.obRole);
+        setDot(d2, '3', p1.length >= 4 && p1 === p2);
       },
       startJourney() {
         const nm = document.getElementById('obName').value.trim();
@@ -1107,27 +1125,27 @@
         // v5.0 AI: Salary Day Intelligence
         try {
           const salMsg = getSalaryDayIntelligence();
-          if (salMsg) msgs.push({ dot: '#10b981', text: salMsg, action: 'Sources ›', target: 'sources' });
+          if (salMsg) msgs.push({ dot: 'var(--nec)', text: salMsg, action: 'Sources ›', target: 'sources' });
         } catch(e) { console.warn("[catch]", e); }
 
-        msgs.push({ dot: '#f59e0b', text: '💡 Tag your spends to track events like birthdays, travel and festivals separately', action: 'Add ›', target: 'add' });
-        msgs.push({ dot: '#0ea5e9', text: '💾 Save your data file regularly — it\'s your backup AND your password recovery key', action: 'Settings ›', target: 'settings' });
+        msgs.push({ dot: 'var(--warn)', text: '💡 Tag your spends to track events like birthdays, travel and festivals separately', action: 'Add ›', target: 'add' });
+        msgs.push({ dot: 'var(--tealD)', text: '💾 Save your data file regularly — it\'s your backup AND your password recovery key', action: 'Settings ›', target: 'settings' });
         msgs.push({ dot: '#8b5cf6', text: '📊 Check your Insights to discover your spending personality and patterns', action: 'Insights ›', target: 'insights' });
-        if (daysLeft <= 5) msgs.push({ dot: '#f43f5e', text: `📅 Only ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left in ${currentMonth} — review your month before it closes`, action: 'Month ›', target: 'month' });
+        if (daysLeft <= 5) msgs.push({ dot: 'var(--lux)', text: `📅 Only ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left in ${currentMonth} — review your month before it closes`, action: 'Month ›', target: 'month' });
         const sdHome = SRC_DB.load();
         const hasSources = (sdHome.sources || []).some(s => s.month === currentMonth);
-        if (!hasSources) msgs.push({ dot: '#10b981', text: '💰 Add your income to Sources to see exactly how much you have left this month', action: 'Sources ›', target: 'sources' });
+        if (!hasSources) msgs.push({ dot: 'var(--nec)', text: '💰 Add your income to Sources to see exactly how much you have left this month', action: 'Sources ›', target: 'sources' });
         Object.entries(D.limits || {}).forEach(([k, lim]) => {
           if (lim > 0 && sm[k] >= lim * BUDGET_WARN_PCT) {
             const pct = Math.round((sm[k] / lim) * 100);
             const isOver = sm[k] > lim;
-            msgs.push({ dot: isOver ? '#ef4444' : '#f59e0b', text: `${isOver ? '⚠' : '⚡'} ${BUCKETS[k]?.l || k} is ${isOver ? 'over' : 'at ' + pct + '% of'} your monthly limit`, action: 'Limits ›', target: 'limits' });
+            msgs.push({ dot: isOver ? 'var(--err)' : 'var(--warn)', text: `${isOver ? '⚠' : '⚡'} ${BUCKETS[k]?.l || k} is ${isOver ? 'over' : 'at ' + pct + '% of'} your monthly limit`, action: 'Limits ›', target: 'limits' });
           }
         });
         const pendingCount = pending();
-        if (pendingCount > 0) msgs.push({ dot: '#f43f5e', text: `🗂 You have ${pendingCount} unsorted spend${pendingCount !== 1 ? 's' : ''} waiting — sort them into buckets`, action: 'Add ›', target: 'add' });
+        if (pendingCount > 0) msgs.push({ dot: 'var(--lux)', text: `🗂 You have ${pendingCount} unsorted spend${pendingCount !== 1 ? 's' : ''} waiting — sort them into buckets`, action: 'Add ›', target: 'add' });
         msgs.push({ dot: '#64748b', text: '🔒 Your data never leaves this device. No server, no cloud, no tracking. Ever.', action: '', target: '' });
-        msgs.push({ dot: '#0ea5e9', text: '📈 Use the Month view to see week-by-week spending patterns', action: 'Month ›', target: 'month' });
+        msgs.push({ dot: 'var(--tealD)', text: '📈 Use the Month view to see week-by-week spending patterns', action: 'Month ›', target: 'month' });
         // Beta opt-in — shown once per session if beta_ui flag is OFF
         if (!FLAGS.get('beta_ui') && !sessionStorage.getItem('sn_beta_prompted')) {
           msgs.unshift({ dot: '#7c3aed', text: '✦ New features are available — try the updated experience', action: 'Try it ›', target: '_beta_optin' });
@@ -1646,7 +1664,21 @@
         this.refreshTop();
         const _curMon = offsetMonthStr(0);
         const sm = summary(_curMon), pend = pending(), lim = D.limits; // BUG-1: scoped to current month
-        const _streakHTML = '';
+        // BUG-025: was scaffolded as '' and never wired to updateStreak() —
+        // same dead-hook pattern as WD-01 below. Fires a one-time celebration
+        // class when today's update pushed a new personal best.
+        const _streak = updateStreak();
+        const _streakHTML = (_streak && _streak.count > 0) ? (() => {
+          const isNewBest = _streak.count === _streak.best && _streak.count > 1;
+          const celebrateKey = 'sn_streak_celebrated_' + _streak.lastDate;
+          const alreadyCelebrated = _safeGet(celebrateKey, '');
+          const celebrate = isNewBest && !alreadyCelebrated;
+          if (celebrate) { try { localStorage.setItem(celebrateKey, '1'); } catch(e) {} }
+          return `<div class="streak-badge${celebrate ? ' streak-badge--pop' : ''}">
+            <span class="streak-badge-fire">🔥</span>
+            <span class="streak-badge-txt"><b>${_streak.count}</b>-day streak${celebrate ? ' — new best!' : _streak.best > _streak.count ? ` · best ${_streak.best}` : ''}</span>
+          </div>`;
+        })() : '';
         // BUG-4: show full amount + scale badge on hero
         const _hero = fmtHero(sm.total);
         document.getElementById('hHero').innerHTML = sm.total > 0
@@ -1664,7 +1696,7 @@
         const homeBalance = homeSrcTotal - homeSpendTotal;
         const srcIndicatorHTML = homeSrcTotal > 0 ? (() => {
           const nearThresholdHome = homeSrcTotal * 0.1;
-          const balColor = homeBalance < 0 ? '#f43f5e' : homeBalance <= nearThresholdHome ? '#f59e0b' : '#10b981';
+          const balColor = homeBalance < 0 ? 'var(--lux)' : homeBalance <= nearThresholdHome ? 'var(--warn)' : 'var(--nec)';
           const dot = homeBalance < 0 ? '🔴' : homeBalance <= nearThresholdHome ? '🟡' : '🟢';
           return `<div class="dc" onclick="APP.go('sources')">
         <div class="dc-ic" style="background:var(--tealL)">↑</div>
@@ -1703,13 +1735,14 @@
             const isOver = limit>0 && amt>limit;
             const isNear = limit>0 && amt>=limit*.8 && !isOver;
             const pct = limit>0 ? Math.min((amt/limit)*100,100) : 0;
-            const col = isOver ? '#ef4444' : isNear ? '#f59e0b' : cfg.c;
+            const col = isOver ? 'var(--err)' : isNear ? 'var(--warn)' : cfg.c;
+            const topBg = isOver || isNear ? col : `linear-gradient(90deg, ${cfg.c}, ${cfg.cm})`;
             return `<div class="bc-hero${isOver?' over':''}" onclick="APP.go('month')">
-              <div class="bc-top" style="background:${col}"></div>
+              <div class="bc-top" style="background:${topBg}"></div>
               <div class="bc-body">
                 <div class="bc-ic" style="background:${cfg.cl};color:${cfg.c};border-color:${cfg.cm}">${cfg.g}</div>
                 <div class="bc-amt" style="color:${col}">${fmtF(amt)}</div>
-                <div class="bc-nm">${cfg.l} ${isOver?'<span style="color:#ef4444;font-size:8px">● OVER LIMIT</span>':''}</div>
+                <div class="bc-nm">${cfg.l} ${isOver?'<span style="color:var(--err);font-size:8px">● OVER LIMIT</span>':''}</div>
                 ${limit>0?`<div class="bc-pb" style="background:${cfg.cl}"><div class="bc-pf" style="background:${col};width:${pct}%"></div></div><div style="font-size:11px;color:var(--mist);margin-top:4px">of ${fmtF(limit)} · ${Math.round(pct)}%</div>`:`<div style="font-size:11px;color:var(--mist);margin-top:4px">No limit set</div>`}
               </div>
             </div>`;
@@ -1838,8 +1871,8 @@
           return `<div style="margin-bottom:8px">
   <div class="brow" style="border-left-color:${c.c};border-left-width:4px;border-radius:${isExp ? '14px 14px 0 0' : '14px'};margin-bottom:0" onclick="APP._toggleMonthRow('${k}')">
     <div class="bc-ic" style="background:${c.cl};color:${c.c};border-color:${c.cm};width:42px;height:42px;flex-shrink:0">${c.g}</div>
-    <div class="br-info"><div class="br-nm">${c.l}</div><div class="br-bar"><div class="br-bfill" style="background:${isOver ? '#ef4444' : c.c};width:${pct}%"></div></div><div class="br-tag">${c.t}</div></div>
-    <div class="br-right"><div class="br-am" style="color:${isOver ? '#ef4444' : c.c}">${fmtF(amt)}</div><div class="br-pct">${pct}%</div></div>
+    <div class="br-info"><div class="br-nm">${c.l}</div><div class="br-bar"><div class="br-bfill" style="background:${isOver ? 'var(--err)' : c.c};width:${pct}%"></div></div><div class="br-tag">${c.t}</div></div>
+    <div class="br-right"><div class="br-am" style="color:${isOver ? 'var(--err)' : c.c}">${fmtF(amt)}</div><div class="br-pct">${pct}%</div></div>
     <div class="br-chv" style="transform:${isExp ? 'rotate(90deg)' : 'none'};transition:transform .2s">›</div>
   </div>
   ${isExp ? `<div style="background:${c.cl};border-radius:0 0 14px 14px;padding:10px 12px;border:1.5px solid ${c.cm};border-top:none">
@@ -2081,6 +2114,36 @@
       // One month's worth of personality/sharp-insight/stats/buckets/top+week/
       // day-of-week cards — same computations the old all-time r_insights did,
       // just parameterized on a single month's transactions instead of all of them.
+      // BUG-025: bucket breakdown was bars-only, no at-a-glance shape. Renders
+      // a ring chart (stroke-dasharray segments, one per bucket) with the
+      // month total in the center. Pure SVG, no canvas/library — matches how
+      // .mcomp-bars above is hand-rolled too.
+      _donutSVG(bTotals, total) {
+        if (!(total > 0)) return '';
+        const R = 40, CX = 50, CY = 50, C = 2 * Math.PI * R;
+        let offset = 0;
+        const segs = Object.entries(BUCKETS).map(([k, cfg]) => {
+          const amt = bTotals[k] || 0;
+          const frac = amt / total;
+          if (frac <= 0) return '';
+          const dash = frac * C;
+          const seg = `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${cfg.c}" stroke-width="12"
+            stroke-dasharray="${dash} ${C - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${CX} ${CY})"
+            stroke-linecap="butt"><title>${cfg.l}: ${Math.round(frac * 100)}%</title></circle>`;
+          offset += dash;
+          return seg;
+        }).join('');
+        const centerLabel = fmtF(total);
+        const centerFs = centerLabel.length > 9 ? 10 : centerLabel.length > 7 ? 11.5 : 13;
+        return `<div style="display:flex;align-items:center;justify-content:center;padding:8px 0 16px">
+          <svg viewBox="0 0 100 100" width="148" height="148" role="img" aria-label="Spending breakdown by bucket">
+            ${segs}
+            <text x="50" y="47" text-anchor="middle" font-size="${centerFs}" font-weight="800" fill="var(--ink)" font-family="var(--ff)">${centerLabel}</text>
+            <text x="50" y="60" text-anchor="middle" font-size="6.5" fill="var(--slate)" font-family="var(--ff)">total</text>
+          </svg>
+        </div>`;
+      },
+
       _renderInsightMonthCards(txns, monthLabel) {
         const sorted = txns.filter(t => t.bucket);
         const total = sorted.reduce((s, t) => s + t.amount, 0);
@@ -2172,6 +2235,7 @@
 
       <div class="ins-card">
         <div class="ins-card-title">WHERE YOUR MONEY WENT</div>
+        ${this._donutSVG(bTotals, total)}
         ${Object.entries(BUCKETS).map(([k, c]) => {
           const amt = bTotals[k] || 0;
           const pct = total > 0 ? Math.round((amt / total) * 100) : 0;
@@ -2801,8 +2865,23 @@
         (D.transactions || []).forEach(t => (t.tags || []).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1; }));
         const allTags = Object.entries(counts).sort((a, b) => b[1] - a[1]);
         const matches = (q ? allTags.filter(([tag]) => tag.toLowerCase().includes(q)) : allTags).slice(0, 6);
-        if (matches.length === 0) { box.style.display = 'none'; return; }
-        box.innerHTML = matches.map(([tag, count]) =>
+        // BUG-027: recent free-text searches — only shown on an empty field,
+        // same as the tag list, so it doesn't compete with live tag matches.
+        let recentHTML = '';
+        if (!q) {
+          let recent = [];
+          try { recent = JSON.parse(localStorage.getItem('sn_recent_search') || '[]'); } catch(e) {}
+          if (recent.length > 0) {
+            recentHTML = `<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--mist)">RECENT</div>` +
+              recent.map(term => `<div onmousedown="APP.pickRecentSearch('${esc(term).replace(/'/g, "\\'")}')"
+                style="padding:8px 14px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--fog)">
+                <span style="color:var(--mist);font-size:11px">↺</span>
+                <span style="color:var(--ink)">${esc(term)}</span>
+              </div>`).join('');
+          }
+        }
+        if (matches.length === 0 && !recentHTML) { box.style.display = 'none'; return; }
+        box.innerHTML = recentHTML + (matches.length > 0 ? `<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--mist)">${q ? 'MATCHING TAGS' : 'TAGS'}</div>` : '') + matches.map(([tag, count]) =>
           `<div onclick="APP.pickTagSuggest('${esc(tag).replace(/'/g, "\\'")}')"
             style="padding:10px 14px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;border-bottom:1px solid var(--fog)">
             <span style="color:var(--ink);font-weight:600">#${esc(tag)}</span>
@@ -2810,6 +2889,12 @@
           </div>`
         ).join('');
         box.style.display = 'block';
+      },
+      pickRecentSearch(term) {
+        const input = document.getElementById('srchIn');
+        if (input) input.value = term;
+        this.hideTagSuggest();
+        this.r_history();
       },
       hideTagSuggest() {
         const box = document.getElementById('tagSuggest');
@@ -3729,13 +3814,13 @@
         let pillBg, pillColor, pillBorder, pillMsg;
         const nearThreshold = srcTotal * 0.1;
         if (balance < 0) {
-          pillBg = '#fff1f2'; pillColor = '#f43f5e'; pillBorder = '#fda4af';
+          pillBg = 'var(--luxL)'; pillColor = 'var(--lux)'; pillBorder = 'var(--luxM)';
           pillMsg = 'Heads up — your spending has crossed your sources this month.';
         } else if (balance <= nearThreshold) {
-          pillBg = '#fffbeb'; pillColor = '#f59e0b'; pillBorder = '#fde68a';
+          pillBg = 'var(--cftL)'; pillColor = 'var(--cft)'; pillBorder = 'var(--cftM)';
           pillMsg = 'Running low on your sources for this month.';
         } else {
-          pillBg = '#ecfdf5'; pillColor = '#10b981'; pillBorder = '#6ee7b7';
+          pillBg = 'var(--necL)'; pillColor = 'var(--nec)'; pillBorder = 'var(--necM)';
           pillMsg = '';
         }
 
@@ -4968,7 +5053,7 @@
           if (!f) { card.style.display = 'none'; return; }
           textEl.textContent = f.text;
           if (fill) fill.style.width = f.pct + '%';
-          if (fill) fill.style.background = f.pct > 90 ? '#ef4444' : f.pct > 70 ? '#f59e0b' : 'var(--teal)';
+          if (fill) fill.style.background = f.pct > 90 ? 'var(--err)' : f.pct > 70 ? 'var(--warn)' : 'var(--teal)';
           card.style.display = 'block';
         } catch(e) {
           console.warn('AI forecast render error:', e);
@@ -4992,6 +5077,7 @@
           if (subEl) subEl.textContent = info.dailyBudget > 0
             ? `${info.daysLeft} days left · ≈ ${fmtF(info.dailyBudget)}/day`
             : info.left < 0 ? `Over budget by ${fmtF(Math.abs(info.left))} 😬` : '';
+          if (card.style.display === 'none') { card.classList.remove('ai-hc-enter'); void card.offsetWidth; card.classList.add('ai-hc-enter'); }
           card.style.display = 'block';
         } catch(e) { if (card) card.style.display = 'none'; }
       };
@@ -5009,6 +5095,7 @@
           if (textEl) textEl.textContent = streak === 1
             ? `Yesterday was a guilt-free day 🌿`
             : `${streak} guilt-free ${plural} in a row — nice discipline! 🌿`;
+          if (card.style.display === 'none') { card.classList.remove('ai-hc-enter'); void card.offsetWidth; card.classList.add('ai-hc-enter'); }
           card.style.display = 'block';
         } catch(e) { if (card) card.style.display = 'none'; }
       };
@@ -5035,6 +5122,7 @@
               return `<div>${msg}</div>`;
             }).join('');
           }
+          if (card.style.display === 'none') { card.classList.remove('ai-hc-enter'); void card.offsetWidth; card.classList.add('ai-hc-enter'); }
           card.style.display = 'block';
         } catch(e) { if (card) card.style.display = 'none'; }
       };
@@ -5459,7 +5547,20 @@
     let _rHistTimer; // LW-02: let not var
     function rHistDebounced() {
       clearTimeout(_rHistTimer);
-      _rHistTimer = setTimeout(rHist, 200);
+      _rHistTimer = setTimeout(() => {
+        rHist();
+        // BUG-027: record real free-text searches (merchant/amount) so
+        // showTagSuggest can offer them back on next focus — search had no
+        // memory at all before this, only the separate tag-suggest list.
+        try {
+          const q = (document.getElementById('srchIn')?.value || '').trim();
+          if (q.length >= 2) {
+            let recent = JSON.parse(localStorage.getItem('sn_recent_search') || '[]');
+            recent = [q, ...recent.filter(r => r.toLowerCase() !== q.toLowerCase())].slice(0, 5);
+            localStorage.setItem('sn_recent_search', JSON.stringify(recent));
+          }
+        } catch(e) {}
+      }, 200);
     }
 
     _guardAPP(APP);

@@ -679,10 +679,10 @@
 
         <!-- Collapsible trust details -->
         <div id="trustAccordion" style="margin: 0 0 16px">
-          <div onclick="APP.toggleTrustAccordion()"
+          <div onclick="APP.toggleTrustAccordion()" onkeydown="APP.a11yActivate(event)" role="button" tabindex="0" aria-expanded="false" aria-controls="trustDetails"
             style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:rgba(255,255,255,.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:12px;cursor:pointer;border:1px solid rgba(255,255,255,.14)">
             <span class="txt-label-w">How does this work? ›</span>
-            <span id="trustToggleIcon" style="font-size:12px;color:#0ea5e9;font-weight:700">expand</span>
+            <span id="trustToggleIcon" style="font-size:12px;color:var(--tealD);font-weight:700">expand</span>
           </div>
           <div id="trustDetails"
             style="display:none;margin-top:8px;flex-direction:column;gap:0;background:rgba(255,255,255,.06);border-radius:12px;border:1px solid rgba(255,255,255,.12);overflow:hidden">
@@ -758,8 +758,8 @@
         <button class="trust-cta" onclick="APP.trustAccepted()">
           I understand — Let's begin →
         </button>
-        <button onclick="APP.trustSkip()"
-          style="width:100%;background:rgba(56,189,248,.25);backdrop-filter:blur(12px);border:1px solid rgba(56,189,248,.40);border-radius:12px;padding:14px;font-size:14px;font-weight:700;color:#7dd3fc;cursor:pointer;margin-top:10px;font-family:var(--ff)">
+        <button onclick="APP.trustSkip()" class="trust-skip-btn"
+          style="width:100%;background:rgba(56,189,248,.25);backdrop-filter:blur(12px);border:1px solid rgba(56,189,248,.40);border-radius:12px;padding:14px;font-size:14px;font-weight:700;color:var(--tealM);cursor:pointer;margin-top:10px;font-family:var(--ff)">
           📂 Already have an account? Load my data file
         </button>
 
@@ -786,7 +786,7 @@
         <button class="lk-forgot" onclick="APP.showForgot()">Forgot password?</button>
         <div class="lk-hint">🔒 Your data stays only on this device<br>No server · No cloud · No tracking<br>© Sandeep
           Hakki · hakki.in<br><br>
-          <span style="color:var(--teal);font-size:11px;font-weight:600;cursor:pointer" onclick="APP.showTrustAgain()">
+          <span class="trust-why-link" style="color:var(--teal);font-size:11px;font-weight:600;cursor:pointer" onclick="APP.showTrustAgain()">
             Why should I trust this app?
           </span>
         </div>
@@ -826,7 +826,7 @@
           <div class="fg-warn-text">Without your data file, the password cannot be recovered. You can clear all data and
             start fresh.<br><br>
             <button onclick="APP.clearAllFresh()"
-              style="font-size:12px;color:#dc2626;font-weight:700;background:none;border:none;cursor:pointer;text-decoration:underline">Clear
+              style="font-size:12px;color:var(--err);font-weight:700;background:none;border:none;cursor:pointer;text-decoration:underline">Clear
               everything and start fresh</button>
           </div>
         </div>
@@ -844,7 +844,22 @@
           <div class="ob-sub">Your money mirror. Let's set you up once.</div>
         </div>
 
-        <div class="ob-photo" id="obPhoto" onclick="APP.pickPhoto('ob')">
+        <!-- BUG-028: onboarding was a single undifferentiated form with no
+             visual structure or sense of progress. Split into 3 labeled
+             sections (still one scroll, no page nav — least risk to the
+             existing validation/submit flow) with a step icon each and a
+             dot tracker that fills in as required fields are completed. -->
+        <div class="ob-progress" id="obProgress">
+          <div class="ob-prog-step"><div class="ob-prog-dot" id="obProgDot0">1</div><span>About you</span></div>
+          <div class="ob-prog-line"></div>
+          <div class="ob-prog-step"><div class="ob-prog-dot" id="obProgDot1">2</div><span>Your role</span></div>
+          <div class="ob-prog-line"></div>
+          <div class="ob-prog-step"><div class="ob-prog-dot" id="obProgDot2">3</div><span>Secure it</span></div>
+        </div>
+
+        <div class="ob-section-hdr"><span class="ob-section-ic">👤</span><span>About you</span></div>
+
+        <div class="ob-photo" id="obPhoto" onclick="APP.pickPhoto('ob')" onkeydown="APP.a11yActivate(event)" role="button" tabindex="0" aria-label="Add photo">
           <span style="font-size:28px;color:var(--fog)">◉</span>
           <span style="font-size:10px;color:var(--slate)">Add photo</span>
         </div>
@@ -863,6 +878,7 @@
           <label class="fg-lbl" for="obCity">YOUR CITY</label>
           <input class="fg-in" id="obCity" type="text" inputmode="text" placeholder="e.g. Bengaluru">
         </div>
+        <div class="ob-section-hdr"><span class="ob-section-ic">🎯</span><span>Your role</span></div>
         <div class="fg-grp">
           <label class="fg-lbl">I AM A... *</label>
           <div class="roles" id="obRoles"></div>
@@ -872,6 +888,7 @@
           <textarea class="fg-in fg-ta" id="obQuote" placeholder="Something that motivates you..."></textarea>
         </div>
 
+        <div class="ob-section-hdr"><span class="ob-section-ic">🔐</span><span>Secure it</span></div>
         <div class="ob-pw-box">
           <div class="ob-pw-note">🔐 Set a password — only you can unlock this app on any device.</div>
           <div class="pw-row">
@@ -908,7 +925,7 @@
               <div class="tb-name" id="tbName">Friend</div>
               <div class="tb-role" id="tbRole"></div>
             </div>
-            <div class="tb-av" id="tbAv" onclick="APP.go('settings')"></div>
+            <div class="tb-av" id="tbAv" onclick="APP.go('settings')" onkeydown="APP.a11yActivate(event)" role="button" tabindex="0" aria-label="Open Settings"></div>
           </div>
           <div class="qt-box">
             <div class="qt-bar"></div>
@@ -947,20 +964,20 @@
             </div>
             <!-- IMP-1: Payday Mode card -->
             <div id="aiPaydayCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:var(--tealL);border:1.5px solid var(--tealM)">
-              <div style="font-size:10px;font-weight:700;color:var(--tealD);letter-spacing:1.5px;margin-bottom:6px">💰 PAYDAY MODE</div>
-              <div id="aiPaydayText" style="font-size:14px;font-weight:700;color:var(--tealD)"></div>
-              <div id="aiPaydaySub" style="font-size:12px;color:var(--teal);margin-top:3px"></div>
+              <div class="ai-hc-eyebrow" style="font-size:10px;font-weight:700;color:var(--tealD);letter-spacing:1.5px;margin-bottom:6px">💰 PAYDAY MODE</div>
+              <div id="aiPaydayText" class="ai-hc-text" style="font-size:14px;font-weight:700;color:var(--tealD)"></div>
+              <div id="aiPaydaySub" class="ai-hc-sub" style="font-size:12px;color:var(--teal);margin-top:3px"></div>
             </div>
             <!-- IMP-2: Guilt-Free Day card -->
-            <div id="aiGuiltFreeCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:#f0fdf4;border:1.5px solid #bbf7d0">
-              <div style="font-size:10px;font-weight:700;color:#15803d;letter-spacing:1.5px;margin-bottom:4px">🌿 GUILT-FREE STREAK</div>
-              <div id="aiGuiltFreeText" style="font-size:14px;font-weight:700;color:#15803d"></div>
+            <div id="aiGuiltFreeCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:var(--necL);border:1.5px solid var(--necM)">
+              <div class="ai-hc-eyebrow" style="font-size:10px;font-weight:700;color:var(--nec);letter-spacing:1.5px;margin-bottom:4px">🌿 GUILT-FREE STREAK</div>
+              <div id="aiGuiltFreeText" class="ai-hc-text" style="font-size:14px;font-weight:700;color:var(--nec)"></div>
             </div>
             <!-- IMP-5: Month-End Warning card -->
-            <div id="aiMonthEndCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:#fff7ed;border:1.5px solid #fed7aa">
-              <div style="font-size:10px;font-weight:700;color:#c2410c;letter-spacing:1.5px;margin-bottom:6px">⚠️ MONTH-END CHECK</div>
-              <div id="aiMonthEndText" style="font-size:13px;color:#9a3412;line-height:1.6"></div>
-              <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}APP.buildHomeCarousels();" style="margin-top:8px;font-size:11px;font-weight:700;color:#c2410c;background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
+            <div id="aiMonthEndCard" style="display:none;padding:14px 16px;border-radius:var(--r);background:var(--cftL);border:1.5px solid var(--cftM)">
+              <div class="ai-hc-eyebrow" style="font-size:10px;font-weight:700;color:var(--cft);letter-spacing:1.5px;margin-bottom:6px">⚠️ MONTH-END CHECK</div>
+              <div id="aiMonthEndText" class="ai-hc-text-sm" style="font-size:13px;color:var(--cft);line-height:1.6"></div>
+              <button onclick="document.getElementById('aiMonthEndCard').style.display='none';try{localStorage.setItem('sn_monthend_warned',JSON.stringify({month:new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'}),dismissed:true}))}catch(e){}APP.buildHomeCarousels();" class="ai-hc-dismiss" style="margin-top:8px;font-size:11px;font-weight:700;color:var(--cft);background:none;border:none;cursor:pointer;padding:0;font-family:var(--ff)">Dismiss ×</button>
             </div>
             <div class="h-hero" id="hHero"></div>
             <div class="h-body fade-up" id="hBody"></div>
@@ -972,8 +989,8 @@
           <div
             style="background:rgba(255,255,255,.08);backdrop-filter:blur(24px) saturate(1.8);-webkit-backdrop-filter:blur(24px) saturate(1.8);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.12);flex-shrink:0;box-shadow:var(--sh)">
             <div>
-              <div style="font-size:22px;font-weight:800;color:var(--ink)">Insights</div>
-              <div style="font-size:11px;color:var(--slate);margin-top:1px" id="insightsSub"></div>
+              <div class="hdr-title-lg" style="font-size:22px;font-weight:800;color:var(--ink)">Insights</div>
+              <div class="hdr-sub-lg" style="font-size:11px;color:var(--slate);margin-top:1px" id="insightsSub"></div>
             </div>
             <div style="font-size:20px">◈</div>
           </div>
@@ -985,8 +1002,8 @@
           <div
             style="background:rgba(255,255,255,.08);backdrop-filter:blur(24px) saturate(1.8);-webkit-backdrop-filter:blur(24px) saturate(1.8);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.12);flex-shrink:0">
             <div>
-              <div style="font-size:22px;font-weight:800;color:var(--ink)">My Month</div>
-              <div style="font-size:11px;color:var(--slate);margin-top:1px" id="mmSub"></div>
+              <div class="hdr-title-lg" style="font-size:22px;font-weight:800;color:var(--ink)">My Month</div>
+              <div class="hdr-sub-lg" style="font-size:11px;color:var(--slate);margin-top:1px" id="mmSub"></div>
             </div>
             <button onclick="APP.shareMonth()"
               style="font-size:12px;font-weight:700;color:var(--teal);background:none;border:none;cursor:pointer">Share
@@ -1089,7 +1106,7 @@
               </div>
             </div>
             <button class="ai-save-btn" id="aiSaveBtn" style="display:none" onclick="APP.aiSaveConfirmed()">✅ Save Spend</button>
-            <div class="ai-manual-toggle" id="aiManualToggle" onclick="APP.aiToggleManual()">or <span>add manually ↓</span></div>
+            <div class="ai-manual-toggle" id="aiManualToggle" onclick="APP.aiToggleManual()" onkeydown="APP.a11yActivate(event)" role="button" tabindex="0">or <span>add manually ↓</span></div>
 
             <!-- MANUAL FORM (collapsible) -->
             <div id="aiManualForm" style="display:none">
@@ -1143,7 +1160,7 @@
             </div>
             <!-- IMP-2: sticky thumb-reachable Save button -->
             <div style="padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));margin-top:8px">
-              <button id="addSave" onclick="APP.saveManual()" disabled
+              <button id="addSave" class="add-save-btn" onclick="APP.saveManual()" disabled
                 style="width:100%;padding:16px;font-size:17px;font-weight:700;background:var(--teal);color:#fff;border:none;border-radius:var(--r);cursor:pointer;opacity:.3;font-family:var(--ff);transition:opacity .15s">
                 Save Spend
               </button>
@@ -1187,8 +1204,8 @@
           <div
             style="background:rgba(255,255,255,.08);backdrop-filter:blur(24px) saturate(1.8);-webkit-backdrop-filter:blur(24px) saturate(1.8);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.12);flex-shrink:0;box-shadow:var(--sh)">
             <div>
-              <div style="font-size:22px;font-weight:800;color:var(--ink)">Sources</div>
-              <div style="font-size:11px;color:var(--slate);margin-top:1px" id="sourcesSub">Where your money comes from
+              <div class="hdr-title-lg" style="font-size:22px;font-weight:800;color:var(--ink)">Sources</div>
+              <div class="hdr-sub-lg" style="font-size:11px;color:var(--slate);margin-top:1px" id="sourcesSub">Where your money comes from
               </div>
             </div>
             <!-- BUG-13: multiple sources allowed - can tap Add multiple times -->
@@ -1205,7 +1222,7 @@
       <div id="smartBanner" style="display:none">
         <div class="sbn-dot" id="sbnDot"></div>
         <div class="sbn-text" id="sbnText"></div>
-        <div class="sbn-action" id="sbnAction" onclick="APP.sbnTap()"></div>
+        <div class="sbn-action" id="sbnAction" onclick="APP.sbnTap()" onkeydown="APP.a11yActivate(event)" role="button" tabindex="0"></div>
         <button class="sbn-close" onclick="document.getElementById('smartBanner').style.display='none';document.body.classList.remove('banner-visible');if(APP&&APP.sbnClose)APP.sbnClose();" aria-label="Close tip" title="Tips return next time you open the app" style="background:none;border:none;color:var(--mist);font-size:16px;cursor:pointer;padding:4px 6px;flex-shrink:0;font-family:var(--ff)">×</button>
         <div class="sbn-dots" id="sbnDots"></div>
       </div>

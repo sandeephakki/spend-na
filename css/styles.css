@@ -784,6 +784,78 @@
       object-fit: cover;
     }
 
+    /* BUG-028: onboarding progress dots + section headers */
+    .ob-progress {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 0;
+      margin: 0 0 24px;
+    }
+    .ob-prog-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 76px;
+    }
+    .ob-prog-step span {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--slate);
+      text-align: center;
+      letter-spacing: .02em;
+    }
+    .ob-prog-dot {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 2px solid var(--fog);
+      background: var(--card);
+      color: var(--slate);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      transition: background .2s, border-color .2s, color .2s, transform .2s;
+    }
+    .ob-prog-dot.done {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #fff;
+      transform: scale(1.08);
+    }
+    .ob-prog-line {
+      height: 2px;
+      width: 20px;
+      background: var(--fog);
+      margin-top: 13px;
+      flex-shrink: 0;
+    }
+    .ob-section-hdr {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--slate);
+      margin: 20px 0 10px;
+    }
+    .ob-section-ic {
+      width: 22px;
+      height: 22px;
+      border-radius: 7px;
+      background: var(--tealL);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
     .fg-grp {
       margin-bottom: 16px;
     }
@@ -4515,6 +4587,30 @@
     /* Minimum tap targets in large mode */
     body.focus-large .tab { min-height: 60px; }
     body.focus-large button { min-height: 44px; }
+    /* BUG-024: elements that were missing from focus-mode coverage — screen
+       headers, AI home cards (Payday/Guilt-Free/Month-End), trust screen CTA
+       + "why trust" link, and the Add Spend submit button all had hardcoded
+       inline font-size and did not scale with the text-size setting. */
+    body.focus-comfortable .hdr-title-lg { font-size: 25px !important; }
+    body.focus-large .hdr-title-lg { font-size: 28px !important; }
+    body.focus-comfortable .hdr-sub-lg { font-size: 12px !important; }
+    body.focus-large .hdr-sub-lg { font-size: 13px !important; }
+    body.focus-comfortable .ai-hc-eyebrow { font-size: 11px !important; }
+    body.focus-large .ai-hc-eyebrow { font-size: 12px !important; }
+    body.focus-comfortable .ai-hc-text { font-size: 16px !important; }
+    body.focus-large .ai-hc-text { font-size: 18px !important; }
+    body.focus-comfortable .ai-hc-sub { font-size: 13px !important; }
+    body.focus-large .ai-hc-sub { font-size: 14px !important; }
+    body.focus-comfortable .ai-hc-text-sm { font-size: 14px !important; }
+    body.focus-large .ai-hc-text-sm { font-size: 16px !important; }
+    body.focus-comfortable .ai-hc-dismiss { font-size: 12px !important; }
+    body.focus-large .ai-hc-dismiss { font-size: 13px !important; }
+    body.focus-comfortable .trust-skip-btn { font-size: 16px !important; }
+    body.focus-large .trust-skip-btn { font-size: 18px !important; }
+    body.focus-comfortable .trust-why-link { font-size: 12px !important; }
+    body.focus-large .trust-why-link { font-size: 13px !important; }
+    body.focus-comfortable .add-save-btn { font-size: 19px !important; }
+    body.focus-large .add-save-btn { font-size: 21px !important; }
     .focus-badge {
       display: inline-flex; align-items: center; justify-content: center;
       background: var(--paper); border: 1.5px solid var(--fog);
@@ -4654,6 +4750,19 @@
   @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 8px rgba(239,68,68,0)}}
 
+  /* BUG-025: streak badge — was scaffolded (updateStreak() computed but never
+     rendered). Sits above the hint/bucket carousel on Home. */
+  .streak-badge{margin:0 max(16px, var(--safe-r)) 12px max(16px, var(--safe-l));display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.30)}
+  .streak-badge-fire{font-size:18px;line-height:1}
+  .streak-badge-txt{font-size:13px;color:var(--ink)}
+  .streak-badge-txt b{font-weight:800;color:var(--cft)}
+  .streak-badge--pop{animation:streakPop .6s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes streakPop{0%{transform:scale(.85);opacity:0}55%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+  /* BUG-026: AI cards (Payday/Guilt-Free/Month-End) appeared with a hard
+     display:none→block cut. Only applied on the hidden→visible transition
+     (see aiRenderPayday/GuiltFree/MonthEnd) — not on every re-render. */
+  .ai-hc-enter{animation:fadeUp .35s ease both}
+
   /* BUG-012: prefers-reduced-motion — accessibility */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -4663,8 +4772,8 @@
     }
   }
 
-  /* BUG-022: keyboard focus indicator */
-  button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
+  /* BUG-022: keyboard focus indicator — also covers role="button" divs (BUG-023) */
+  button:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
 
   /* ── NATIVE APP FEEL IMPROVEMENTS ─────────────────────────── */
   /* Momentum scrolling on all scroll containers */
