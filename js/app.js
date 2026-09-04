@@ -45,27 +45,15 @@
     ];
 
     // ── TAG REGISTRY — dynamic tag persistence ────────────────────────
-    const TAG_REGISTRY_KEY = 'sn_tag_registry';
-    const TAG_PRUNE_DAYS = 90;
-    // LW-03: named constants replacing magic numbers
+    // v6.19-restructure: TAG_REGISTRY_KEY, TAG_PRUNE_DAYS, TAG_PRUNE_MS,
+    // _loadTagRegistry, _saveTagRegistry, pruneOldTags moved to
+    // js/dal/common/storage.js (DAL batch 1) — loaded before this file,
+    // same global scope, so the calls below still resolve unchanged.
     const MS_PER_DAY = 86400000;
-    const TAG_PRUNE_MS = TAG_PRUNE_DAYS * MS_PER_DAY;
     const WEEK_MS = 7 * MS_PER_DAY;
     const MAX_AMT = 9999999;
     const BUDGET_WARN_PCT = 0.8;
 
-
-    function _loadTagRegistry() {
-      try {
-        const raw = localStorage.getItem(TAG_REGISTRY_KEY);
-        if (!raw) return { tags: [] };
-        return JSON.parse(raw);
-      } catch(e) { return { tags: [] }; }
-    }
-
-    function _saveTagRegistry(registry) {
-      try { localStorage.setItem(TAG_REGISTRY_KEY, JSON.stringify(registry)); } catch(e) { console.warn("[catch]", e); }
-    }
 
     function recordTagUsage(tagName) {
       if (!tagName || PRESET_TAGS.includes(tagName)) return; // presets don't need tracking
@@ -81,12 +69,6 @@
       _saveTagRegistry(registry);
     }
 
-    function pruneOldTags() {
-      const registry = _loadTagRegistry();
-      const cutoff = Date.now() - TAG_PRUNE_MS;
-      registry.tags = registry.tags.filter(t => (t.lastUsed || 0) >= cutoff);
-      _saveTagRegistry(registry);
-    }
 
     let _tagsPruned = false; // MQ-02: prune once per session
     function getDynamicTagList() {
@@ -100,29 +82,15 @@
       return [...PRESET_TAGS, ...customTags];
     }
 
-    function migrateTagsToRegistry() {
-      // Run once: scan all transactions and seed registry with existing custom tags
-      const registry = _loadTagRegistry();
-      if (registry._migrated) return;
-      const now = Date.now();
-      const txns = (D && D.transactions) ? D.transactions : [];
-      for (const t of txns) {
-        if (!t.tags) continue;
-        for (const tag of t.tags) {
-          if (PRESET_TAGS.includes(tag)) continue;
-          const existing = registry.tags.find(r => r.name === tag);
-          if (existing) {
-            existing.useCount = (existing.useCount || 1) + 1;
-          } else {
-            registry.tags.push({ name: tag, lastUsed: now, useCount: 1 });
-          }
-        }
-      }
-      registry._migrated = true;
-      _saveTagRegistry(registry);
-    }
+    // migrateTagsToRegistry moved to js/dal/common/storage.js (batch 3) —
+    // loaded before this file, same global scope.
 
-    const LS = 'sn_v4';
+    // LS, DB, SRC_DB, SHARD, debouncedSave, _commitSave moved to
+    // js/dal/common/storage.js (batch 3) — loaded before this file,
+    // same global scope. (AI_CONFIG_DEFAULT/FLAG_DEFAULTS/FLAGS below
+    // stay in app.js — not a DAL concern per restructure doc, and were
+    // recovered here after an earlier bad line-range deletion in this
+    // same batch caught by the node --check + grep cross-check below.)
 
     // ── AI CONFIG SYSTEM ──────────────────────────────────────────
     const AI_CONFIG_DEFAULT = {
@@ -144,106 +112,9 @@
       try { localStorage.setItem('sn_ai_config', JSON.stringify(cfg)); } catch(e) { console.warn("[catch]", e); }
     }
 
-    // ── STORAGE GUARD ─────────────────────────────────────────────
-    function isStorageAvailable() {
-      try { localStorage.setItem('_sn_test', '1'); localStorage.removeItem('_sn_test'); return true; }
-      catch (e) { return false; }
-    }
-
-    // ── MD5 ────────────────────────────────────────────────────────
-    function md5(s) {
-      function sa(x, y) { const l = (x & 0xFFFF) + (y & 0xFFFF), m = (x >> 16) + (y >> 16) + (l >> 16); return (m << 16) | (l & 0xFFFF) }
-      function rl(n, c) { return (n << c) | (n >>> (32 - c)) }
-      function cm(q, a, b, x, s, t) { return sa(rl(sa(sa(a, q), sa(x, t)), s), b) }
-      const ff = (a, b, c, d, x, s, t) => cm((b & c) | ((~b) & d), a, b, x, s, t);
-      const gg = (a, b, c, d, x, s, t) => cm((b & d) | (c & (~d)), a, b, x, s, t);
-      const hh = (a, b, c, d, x, s, t) => cm(b ^ c ^ d, a, b, x, s, t);
-      const ii = (a, b, c, d, x, s, t) => cm(c ^ (b | (~d)), a, b, x, s, t);
-      const str = unescape(encodeURIComponent(s));
-      const by = []; for (let i = 0; i < str.length; i++)by.push(str.charCodeAt(i));
-      by.push(0x80); while (by.length % 64 !== 56) by.push(0);
-      const lo = str.length * 8; by.push(lo & 0xFF, (lo >> 8) & 0xFF, (lo >> 16) & 0xFF, (lo >> 24) & 0xFF, 0, 0, 0, 0);
-      let a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
-      for (let i = 0; i < by.length; i += 64) {
-        const M = []; for (let j = 0; j < 16; j++)M[j] = by[i + j * 4] | (by[i + j * 4 + 1] << 8) | (by[i + j * 4 + 2] << 16) | (by[i + j * 4 + 3] << 24);
-        const [A, B, C, D] = [a, b, c, d];
-        a = ff(a, b, c, d, M[0], 7, -680876936); d = ff(d, a, b, c, M[1], 12, -389564586); c = ff(c, d, a, b, M[2], 17, 606105819); b = ff(b, c, d, a, M[3], 22, -1044525330);
-        a = ff(a, b, c, d, M[4], 7, -176418897); d = ff(d, a, b, c, M[5], 12, 1200080426); c = ff(c, d, a, b, M[6], 17, -1473231341); b = ff(b, c, d, a, M[7], 22, -45705983);
-        a = ff(a, b, c, d, M[8], 7, 1770035416); d = ff(d, a, b, c, M[9], 12, -1958414417); c = ff(c, d, a, b, M[10], 17, -42063); b = ff(b, c, d, a, M[11], 22, -1990404162);
-        a = ff(a, b, c, d, M[12], 7, 1804603682); d = ff(d, a, b, c, M[13], 12, -40341101); c = ff(c, d, a, b, M[14], 17, -1502002290); b = ff(b, c, d, a, M[15], 22, 1236535329);
-        a = gg(a, b, c, d, M[1], 5, -165796510); d = gg(d, a, b, c, M[6], 9, -1069501632); c = gg(c, d, a, b, M[11], 14, 643717713); b = gg(b, c, d, a, M[0], 20, -373897302);
-        a = gg(a, b, c, d, M[5], 5, -701558691); d = gg(d, a, b, c, M[10], 9, 38016083); c = gg(c, d, a, b, M[15], 14, -660478335); b = gg(b, c, d, a, M[4], 20, -405537848);
-        a = gg(a, b, c, d, M[9], 5, 568446438); d = gg(d, a, b, c, M[14], 9, -1019803690); c = gg(c, d, a, b, M[3], 14, -187363961); b = gg(b, c, d, a, M[8], 20, 1163531501);
-        a = gg(a, b, c, d, M[13], 5, -1444681467); d = gg(d, a, b, c, M[2], 9, -51403784); c = gg(c, d, a, b, M[7], 14, 1735328473); b = gg(b, c, d, a, M[12], 20, -1926607734);
-        a = hh(a, b, c, d, M[5], 4, -378558); d = hh(d, a, b, c, M[8], 11, -2022574463); c = hh(c, d, a, b, M[11], 16, 1839030562); b = hh(b, c, d, a, M[14], 23, -35309556);
-        a = hh(a, b, c, d, M[1], 4, -1530992060); d = hh(d, a, b, c, M[4], 11, 1272893353); c = hh(c, d, a, b, M[7], 16, -155497632); b = hh(b, c, d, a, M[10], 23, -1094730640);
-        a = hh(a, b, c, d, M[13], 4, 681279174); d = hh(d, a, b, c, M[0], 11, -358537222); c = hh(c, d, a, b, M[3], 16, -722521979); b = hh(b, c, d, a, M[6], 23, 76029189);
-        a = hh(a, b, c, d, M[9], 4, -640364487); d = hh(d, a, b, c, M[12], 11, -421815835); c = hh(c, d, a, b, M[15], 16, 530742520); b = hh(b, c, d, a, M[2], 23, -995338651);
-        a = ii(a, b, c, d, M[0], 6, -198630844); d = ii(d, a, b, c, M[7], 10, 1126891415); c = ii(c, d, a, b, M[14], 15, -1416354905); b = ii(b, c, d, a, M[5], 21, -57434055);
-        a = ii(a, b, c, d, M[12], 6, 1700485571); d = ii(d, a, b, c, M[3], 10, -1894986606); c = ii(c, d, a, b, M[10], 15, -1051523); b = ii(b, c, d, a, M[1], 21, -2054922799);
-        a = ii(a, b, c, d, M[8], 6, 1873313359); d = ii(d, a, b, c, M[15], 10, -30611744); c = ii(c, d, a, b, M[6], 15, -1560198380); b = ii(b, c, d, a, M[13], 21, 1309151649);
-        a = ii(a, b, c, d, M[4], 6, -145523070); d = ii(d, a, b, c, M[11], 10, -1120210379); c = ii(c, d, a, b, M[2], 15, 718787259); b = ii(b, c, d, a, M[9], 21, -343485551);
-        a = sa(a, A); b = sa(b, B); c = sa(c, C); d = sa(d, D);
-      }
-      const h = n => [n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF, (n >> 24) & 0xFF].map(x => (x < 16 ? '0' : '') + x.toString(16)).join('');
-      return [a, b, c, d].map(h).join('');
-    }
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ITEM 1 — SCHEMA VERSION
-    // v1 = prod baseline (no tags, no focusMode, no lastSrc)
-    // v2 = QA/prod master (tags[], focusMode, lastSrc, sources)
-    // Bump SCHEMA_VERSION whenever new required fields are added.
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    const SCHEMA_VERSION = 2;
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ITEM 2 — v1 → v2 MIGRATION FUNCTION
-    // Called on every load (localStorage + file import).
-    // Only operates in memory — user must Save to persist.
-    // Never renames keys. Never deletes data. Only adds defaults.
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    function migrateData(d) {
-      if (!d || typeof d !== 'object') return d;
-      const sv = d.schemaVersion || 1;
-      if (sv >= SCHEMA_VERSION) return d;
-
-      // settings backfill
-      if (!d.settings) d.settings = {};
-      if (typeof d.settings.notif     === 'undefined') d.settings.notif     = false;
-      if (typeof d.settings.focusMode === 'undefined') d.settings.focusMode = false;
-
-      // profile backfill
-      if (!d.profile) d.profile = {};
-      if (typeof d.profile.dob   === 'undefined') d.profile.dob   = '';
-      if (typeof d.profile.city  === 'undefined') d.profile.city  = '';
-      if (typeof d.profile.quote === 'undefined') d.profile.quote = '';
-      if (typeof d.profile.role  === 'undefined') d.profile.role  = 'working';
-
-      // top-level backfill
-      if (typeof d.lastSrc === 'undefined') d.lastSrc = null;
-
-      // limits backfill
-      if (!d.limits) d.limits = {};
-      if (typeof d.limits.necessary   === 'undefined') d.limits.necessary   = 15000;
-      if (typeof d.limits.committed   === 'undefined') d.limits.committed   = 30000;
-      if (typeof d.limits.comfortable === 'undefined') d.limits.comfortable = 10000;
-      if (typeof d.limits.luxury      === 'undefined') d.limits.luxury      = 5000;
-
-      // transaction-level backfill — tags is the most common v1 gap
-      if (Array.isArray(d.transactions)) {
-        d.transactions = d.transactions.map(t => ({
-          ...t,
-          tags:   Array.isArray(t.tags) ? t.tags : [],
-          source: t.source || null,
-          bucket: t.bucket || null,
-        }));
-      }
-
-      d.schemaVersion = SCHEMA_VERSION;
-      try { console.info('[Spend-na] Migrated schema v' + sv + ' → v' + SCHEMA_VERSION); } catch {}
-      return d;
-    }
+    // isStorageAvailable, md5, SCHEMA_VERSION, migrateData already moved to
+    // js/dal/common/storage.js + js/dal/common/auth.js in batch 1 — do not
+    // redeclare here (this comment marks where they used to sit).
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // ITEM 3 — FEATURE FLAGS  (localStorage key: sn_flags)
@@ -276,197 +147,6 @@
     // localStorage = working copy (same full data, just in browser)
     // On every action: both are updated simultaneously
 
-    const DB = {
-      empty() {
-        return {
-          app: 'Spend-na', version: 4,
-          created: new Date().toISOString(),
-          lastSaved: new Date().toISOString(),
-          passwordHash: '',
-          profile: { name: '', role: 'working', photo: null, dob: '', city: '', quote: '' },
-          limits: { necessary: 15000, committed: 30000, comfortable: 10000, luxury: 5000 },
-          settings: { notif: false },
-          transactions: [], // ← ALL records, ever, from day one
-          pushToken: null,
-        };
-      },
-      load() { try { const r = localStorage.getItem(LS); return r ? migrateData(JSON.parse(r)) : null; } catch { return null; } },
-      // Saves FULL data — all transactions included, every time
-      save(d) {
-        try {
-          d.lastSaved = new Date().toISOString();
-          d.schemaVersion = SCHEMA_VERSION; // always stamp current schema version on save
-          localStorage.setItem(LS, JSON.stringify(d));
-          // Write current month shard if sharding flag is on
-          if (typeof SHARD !== 'undefined') SHARD.writeCurrentMonthShard();
-          return true;
-        } catch (e) {
-          // Quota exceeded or private browsing — warn the user
-          if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
-            setTimeout(() => toast('⚠ Storage full! Export your data to free space.'), 100);
-          }
-          return false;
-        }
-      },
-      // Export ALL records as JSON — this IS the full database
-      exportFile(d) {
-        const payload = JSON.parse(JSON.stringify(d));
-        payload.exportedAt = new Date().toISOString();
-        payload.totalRecords = d.transactions.length;
-        payload.schemaVersion = SCHEMA_VERSION;
-        // Manifest metadata — lightweight index for future sharding
-        payload.manifest = {
-          schemaVersion: SCHEMA_VERSION,
-          exportedAt:    payload.exportedAt,
-          totalRecords:  payload.totalRecords,
-          months:        [...new Set((d.transactions || []).map(t => t.month).filter(Boolean))].sort(),
-          countsByMonth: (d.transactions || []).reduce((acc, t) => { if (t.month) acc[t.month] = (acc[t.month] || 0) + 1; return acc; }, {}),
-          totalsByMonth: (d.transactions || []).reduce((acc, t) => { if (t.month) acc[t.month] = (acc[t.month] || 0) + (t.amount || 0); return acc; }, {}),
-          buckets:       Object.keys(BUCKETS),
-          app:           'Spend-na',
-        };
-        payload.note = 'Spend-na complete database. Import back anytime to restore everything from the beginning.';
-        const json = JSON.stringify(payload, null, 2);
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'spend-na-data.json'; // Always same filename — easy to overwrite
-        a.click();
-        localStorage.setItem('sn_last_exported', new Date().toISOString());
-        URL.revokeObjectURL(url);
-      },
-      // Try to overwrite the SAME file using File System Access API (Chrome Android + Desktop)
-      async saveToSameFile(d) {
-        // Check if File System Access API is available
-        if (!window.showSaveFilePicker) { return false; }
-        try {
-          const fh = await window.showSaveFilePicker({
-            suggestedName: 'spend-na-data.json',
-            types: [{ description: 'JSON Data File', accept: { 'application/json': ['.json'] } }],
-          });
-          const ws = await fh.createWritable();
-          const payload = JSON.parse(JSON.stringify(d));
-          payload.lastSaved = new Date().toISOString();
-          payload.totalRecords = d.transactions.length;
-          await ws.write(JSON.stringify(payload, null, 2));
-          await ws.close();
-          return true;
-        } catch (e) {
-          // User cancelled or API not available
-          return false;
-        }
-      },
-      importFile() {
-        return new Promise(res => {
-          const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
-          inp.onchange = async e => {
-            const f = e.target.files[0]; if (!f) { res(null); return; }
-            try { const t = await f.text(); const d = JSON.parse(t); if (!Array.isArray(d.transactions)) { res(null); return; } res(migrateData(d)); }
-            catch { res(null); }
-          };
-          inp.click();
-        });
-      },
-    };
-
-    // ── SOURCES DATABASE ─────────────────────────────────────────
-    // Separate from sn_v4 — plug-in, never affects existing data
-    const SRC_DB = {
-      load() {
-        try {
-          const r = localStorage.getItem('sn_sources');
-          if (!r) return { sources: [] };
-          const parsed = JSON.parse(r);
-          // Guard: ensure sources is always an array (test SEC-023)
-          if (!Array.isArray(parsed.sources)) return { sources: [] };
-          return parsed;
-        } catch { return { sources: [] }; }
-      },
-      save(d) {
-        try { localStorage.setItem('sn_sources', JSON.stringify(d)); return true; }
-        catch { return false; }
-      }
-    };
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ITEM 7 — DATA SHARDING + LAZY LOADING
-    //
-    // Architecture: D.transactions is the single source of truth.
-    // This SHARD module adds a logical layer on top — it lets the
-    // app query transactions by month without loading everything,
-    // and exports individual monthly shards as separate JSON files.
-    //
-    // Keys used (never overlap with sn_v4):
-    //   sn_shard_YYYY_Mon  → e.g. sn_shard_2026_Mar (future use)
-    //
-    // Phase 1 (NOW): logical sharding — queries filter in memory.
-    //   All transactions still live in D.transactions (unchanged).
-    //
-    // Phase 2 (FUTURE): physical sharding — past months moved to
-    //   separate localStorage keys, loaded on demand.
-    //   Guarded by FLAGS.get('data_sharding') === true.
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    const SHARD = {
-      _key(monthStr) {
-        const parts = (monthStr || '').split(' ');
-        return parts.length === 2 ? `sn_shard_${parts[1]}_${parts[0]}` : null;
-      },
-      forMonth(monthStr) {
-        if (!monthStr || !D) return [];
-        if (FLAGS.get('data_sharding')) {
-          const key = this._key(monthStr);
-          if (key) {
-            try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch { /* fall through */ }
-          }
-        }
-        return (D.transactions || []).filter(t => t.month === monthStr);
-      },
-      months() {
-        return [...new Set((D?.transactions || []).map(t => t.month).filter(Boolean))];
-      },
-      manifest() {
-        const txns = D?.transactions || [];
-        const months = this.months();
-        return {
-          schemaVersion: SCHEMA_VERSION,
-          totalRecords:  txns.length,
-          months,
-          countsByMonth: months.reduce((acc, m) => { acc[m] = txns.filter(t => t.month === m).length; return acc; }, {}),
-          totalsByMonth: months.reduce((acc, m) => { acc[m] = txns.filter(t => t.month === m).reduce((s, t) => s + (t.amount || 0), 0); return acc; }, {}),
-        };
-      },
-      exportMonth(monthStr) {
-        const txns = this.forMonth(monthStr);
-        if (!txns.length) { toast('No transactions in ' + monthStr); return; }
-        const payload = {
-          app: 'Spend-na', type: 'monthly-shard',
-          schemaVersion: SCHEMA_VERSION, month: monthStr,
-          exportedAt: new Date().toISOString(),
-          totalRecords: txns.length,
-          total: txns.reduce((s, t) => s + (t.amount || 0), 0),
-          transactions: txns,
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href = url;
-        a.download = `spend-na-${monthStr.replace(' ', '-')}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast(`📦 ${monthStr} shard exported (${txns.length} records)`);
-      },
-      writeCurrentMonthShard() {
-        if (!FLAGS.get('data_sharding') || !D) return;
-        const monthStr = offsetMonthStr(0);
-        const key = this._key(monthStr);
-        if (!key) return;
-        const txns = (D.transactions || []).filter(t => t.month === monthStr);
-        try { localStorage.setItem(key, JSON.stringify(txns)); } catch { /* quota — skip */ }
-      },
-    };
-
-
 
     // ── GLOBAL ERROR BOUNDARY ─────────────────────────────────────
     window.onerror = function(msg, src, line, col, err) {
@@ -478,40 +158,19 @@
       console.error('[unhandledRejection]', e.reason);
       try { toast('⚠️ Background error — please retry'); } catch(_) { /* intentionally silent */ }
     };
-    // ── APP METHOD ERROR GUARD ────────────────────────────────────
-    // Wraps every APP method: uncaught errors show a toast + log,
-    // never crash the UI silently. Applied after APP object is defined.
-    function _guardAPP(obj) {
-      Object.keys(obj).forEach(key => {
-        if (typeof obj[key] !== 'function') return;
-        const orig = obj[key].bind(obj);
-        obj[key] = function(...args) {
-          try {
-            return orig(...args);
-          } catch(err) {
-            console.error('[APP.' + key + ']', err);
-            try { toast('⚠️ Something went wrong — please retry'); } catch(_) { /* intentionally silent */ }
-          }
-        };
-      });
-      return obj;
-    }
+    // _guardAPP moved to js/utils/utils.js (batch 10) — loaded before this file.
     // ── STATE ─────────────────────────────────────────────────────
-    let D = null;
-    let S = { tab: 'home', sliceBk: null, histF: null, addSrc: null, addBkt: null, limVals: {}, setRole: null, setToggles: {}, unsaved: false, obRole: null, obPhoto: null, install: null, saveBusy: false, loginAttempts: 0, loginLockUntil: 0, monthOffset: 0, monthExpanded: null, _autoSaveTimer: null };
+    // v6.19-restructure: D and S moved to js/core/state.js (batch 2),
+    // loaded before this file, same global scope — every reference
+    // below still resolves unchanged.
 
     // ── TAGS SESSION STATE ────────────────────────────────────────
     // Module-level — NOT on S or D. Resets on every r_add() call. Never persisted.
     let _addTags = [];
 
-    // ── HELPERS ───────────────────────────────────────────────────
-    function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;'); }
-    function hashPw(raw) { return md5((raw || '').trim()); } // CR-02: single canonical password hasher — never call md5() directly
-    const DEBUG = (window.ENV && window.ENV.debug) || false; // v5.8: set by env-config.js per environment; NEW-003
-    function log() { if (DEBUG) console.log.apply(console, arguments); } // NEW-003
-    function _safeGet(key, fallback) { if (!key) return fallback; try { const r = localStorage.getItem(key); if (!r) return fallback; const p = JSON.parse(r); return (p !== null && p !== undefined) ? p : fallback; } catch(e) { console.warn('[_safeGet]', key, e); return fallback; } } // CR-03
+    // esc/DEBUG/log/_safeGet moved to js/utils/utils.js (batch 10) — loaded before this file.
     function normTxn(t) { if (!t || typeof t !== 'object') return { merchant:'Unknown', amount:0, bucket:null, source:null, tags:[], date:'', time:'', month:'' }; const amt = parseFloat(t.amount); return { ...t, merchant: (typeof t.merchant === 'string' && t.merchant.trim()) ? t.merchant.trim() : 'Unknown', amount: isFinite(amt) && amt >= 0 ? amt : 0, bucket: t.bucket || null, source: t.source || null, tags: Array.isArray(t.tags) ? t.tags : [], date: t.date || '', time: t.time || '', month: t.month || '' }; } // HR-02: hardened
-    let _saveTimer; function debouncedSave(d, ms) { if (!d) return; ms = ms || 300; clearTimeout(_saveTimer); _saveTimer = setTimeout(function(){ try { DB.save(d); } catch(e) { console.error('[debouncedSave]', e); toast('⚠️ Save failed'); } }, ms); } // HR-04
+    // debouncedSave moved to js/dal/common/storage.js (batch 3).
     // ── TRANSACTION MUTATION HELPERS (DRY) ──────────────────
     // v6.15: shared date parser for the free-text "e.g. 23 Mar" DATE field, used
     // by both Add and Edit. Was previously two separate, both-broken attempts:
@@ -524,10 +183,10 @@
     // logging a December spend in early January doesn't land in the future).
     function _parseDateInput(str) {
       const now = new Date();
-      const fallback = { date: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }), month: now.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) };
+      const fallback = { date: String(now.getDate()).padStart(2,'0') + ' ' + MONTH_ABBR[now.getMonth()], month: MONTH_ABBR[now.getMonth()] + ' ' + now.getFullYear() };
       const parts = (str || '').trim().split(/\s+/);
       if (parts.length < 2) return fallback;
-      const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const mn = MONTH_ABBR;
       const day = parseInt(parts[0], 10);
       const monIdx = mn.findIndex(m => m.toLowerCase() === (parts[1] || '').slice(0,3).toLowerCase());
       if (!day || day < 1 || day > 31 || monIdx === -1) return fallback;
@@ -545,58 +204,37 @@
       };
     }
 
-    function _txnUpdate(id, patch) {
-      if (!id || !D || !Array.isArray(D.transactions)) { console.warn('[_txnUpdate] invalid args', id); return false; }
-      let found = false;
-      try {
-        D.transactions = D.transactions.map(t => {
-          if (t.id !== id) return t;
-          found = true;
-          return typeof patch === 'function' ? patch(t) : { ...t, ...patch };
-        });
-      } catch(e) { console.error('[_txnUpdate]', e); }
-      return found;
+    // v7.1: companion to _parseDateInput, for the native <input type="date">
+    // used by Add Spend. A native date input always returns either an
+    // empty string or a fully-qualified, valid "YYYY-MM-DD" — no partial
+    // input, no ambiguous month name, no "did they mean this year or last
+    // year" guessing. Converts straight to the app's internal {date, month}
+    // shape (same shape _parseDateInput returns, so callers don't care
+    // which one produced it).
+    function _parseISODate(iso) {
+      const now = new Date();
+      const fallback = { date: String(now.getDate()).padStart(2,'0') + ' ' + MONTH_ABBR[now.getMonth()], month: MONTH_ABBR[now.getMonth()] + ' ' + now.getFullYear() };
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+      if (!m) return fallback;
+      const year = parseInt(m[1], 10), monIdx = parseInt(m[2], 10) - 1, day = parseInt(m[3], 10);
+      if (monIdx < 0 || monIdx > 11 || day < 1 || day > 31) return fallback;
+      return {
+        date: `${String(day).padStart(2,'0')} ${MONTH_ABBR[monIdx]}`,
+        month: `${MONTH_ABBR[monIdx]} ${year}`
+      };
     }
-    function _txnDelete(id) {
-      if (!id || !D || !Array.isArray(D.transactions)) { console.warn('[_txnDelete] invalid args', id); return false; }
-      const before = D.transactions.length;
-      try { D.transactions = D.transactions.filter(t => t.id !== id); } catch(e) { console.error('[_txnDelete]', e); return false; }
-      return D.transactions.length < before;
-    }
+
+    // _txnUpdate/_txnDelete moved to js/dal/common/storage.js (batch 4).
     function _mkTxnId() { return 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 5); } // extra entropy for uniqueness
-    function _fmtDate(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''; } catch(e) { return ''; } }
-    function _fmtTime(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''; } catch(e) { return ''; } }
-    function _fmtMonth(d) { try { return d instanceof Date && !isNaN(d) ? d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : ''; } catch(e) { return ''; } }
-    function _commitSave(msg) {
-      try {
-        DB.save(D);
-        if (APP && APP.markUnsaved) APP.markUnsaved();
-        if (msg) toast(msg);
-      } catch(e) {
-        console.error('[_commitSave]', e);
-        toast('⚠️ Save failed — storage may be full');
-      }
-    }
+    // _commitSave moved to js/dal/common/storage.js (batch 3).
     function _confirmDelete(onConfirm) {
       modal('Delete?', 'Cannot be undone.', [
         { l: 'Cancel', c: 'mb-nil', a: () => APP.cm() },
         { l: 'Delete', c: 'mb-err', a: onConfirm }
       ]);
     }
-    function fmt(n) { if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`; if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`; return `₹${n}`; }
-    function fmtF(n) { return '₹' + (isFinite(+n) ? +n : 0).toLocaleString('en-IN'); }
     // BUG-4: hero display = full comma-formatted amount + scale badge
-    function fmtHero(n) {
-      const v = isFinite(+n) ? Math.abs(+n) : 0;
-      const formatted = '₹' + v.toLocaleString('en-IN');
-      let badge = '';
-      if (v >= 10000000)      badge = (v / 10000000).toFixed(2).replace(/\.?0+$/, '') + ' Cr';
-      else if (v >= 100000)   badge = (v / 100000).toFixed(2).replace(/\.?0+$/, '') + ' L';
-      else if (v >= 1000)     badge = (v / 1000).toFixed(1).replace(/\.?0+$/, '') + 'K';
-      return { formatted, badge };
-    }
-    function fmtINR(n) { if (!n && n !== 0) return ''; return Number(n).toLocaleString('en-IN'); }
-    function parseINR(s) { return parseFloat((String(s || '')).replace(/,/g, '')) || 0; }
+    // fmtHero moved to js/ui/common/render.js (batch 8).
     // BUG-3: live Indian-format comma insertion as-you-type
     function _fmtAmtLive(el) {
       if (!el) return;
@@ -624,12 +262,8 @@
       const adj = el.value.length - oldLen;
       try { el.setSelectionRange(Math.max(0, cursor + adj), Math.max(0, cursor + adj)); } catch(_) { /* intentionally silent */ }
     }
-    function avHTML(p, sz) {
-      const s = sz || 44, lt = ((p && p.name && p.name[0]) || 'S').toUpperCase();
-      if (p?.photo && String(p.photo).startsWith('data:image/')) return `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
-      return `<span style="font-size:${Math.round(s * .38)}px;font-weight:800;color:#fff">${lt}</span>`;
-    }
-    function ico(m) { if (!m) return '💸'; const lo = m.toLowerCase(); for (const r of ICONS) if (r.kw.some(k => lo.includes(k))) return r.i; return '💸'; }
+    // avHTML moved to js/ui/common/render.js (batch 8).
+    // ico moved to js/ui/common/render.js (batch 8).
 
     // ── SHARED EXPORT HTML BUILDER ────────────────────────────────
     function _buildReportHtml({ eyebrow, title, amount, subtitle, bCards, rows, txnCount, footerYear }) {
@@ -644,8 +278,6 @@
       const s = { total: 0 }; Object.keys(BUCKETS).forEach(k => s[k] = 0); (D?.transactions || []).forEach(t => { if (t.bucket && BUCKETS[t.bucket] && (!monthStr || t.month === monthStr)) { const a = isFinite(+t.amount) ? +t.amount : 0; s[t.bucket] += a; s.total += a; } }); // hardened: NaN-safe
       _summaryCacheKey[monthStr||'all'] = key; _summaryCache[monthStr||'all'] = s; return s;
     }
-    function offsetMonthStr(offset) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset); return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); }
-    function offsetMonthLong(offset) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset); return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
     function pending() { return (D?.transactions || []).filter(t => !t.bucket).length; }
 
     // ── PLATFORM DETECTION ────────────────────────────────────────
@@ -672,23 +304,11 @@
     }
 
     function toast(msg, ms = 2200) { const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), ms); }
-    function modal(title, body, btns) {
-      document.getElementById('mT').textContent = title;
-      document.getElementById('mB').innerHTML = body;
-      document.getElementById('mBs').innerHTML = btns.map((b, i) => `<button class="mb ${esc(b.c || '')}" id="mb${i}">${esc(b.l)}</button>`).join(''); // CR-01: escape class+label to prevent XSS
-      btns.forEach((b, i) => { document.getElementById('mb' + i).onclick = b.a; });
-      document.getElementById('modal').classList.add('on');
-    }
+    // modal moved to js/ui/common/render.js (batch 8).
     // P-03 / NEW-004: modal()'s body is not auto-escaped. Use these wrappers instead of
     // calling modal() directly so every call site states its intent explicitly.
-    function safeModal(title, safeBodyHtml, btns) {
-      // safeBodyHtml must be a static string / trusted HTML — never raw user input
-      modal(title, safeBodyHtml, btns);
-    }
-    function userModal(title, userText, btns) {
-      // Wraps and escapes user-derived text (merchant names, amounts, tags, notes, etc.)
-      modal(title, `<p>${esc(userText)}</p>`, btns);
-    }
+    // safeModal moved to js/ui/common/render.js (batch 8).
+    // userModal moved to js/ui/common/render.js (batch 8).
 
     // ── PAGE VISIBILITY ───────────────────────────────────────────
     const APP = {
@@ -842,7 +462,13 @@
         // Install banner
         window.addEventListener('beforeinstallprompt', e => {
           e.preventDefault(); S.install = e;
-          document.getElementById('iBanner').classList.add('on');
+          // v7.0-responsive: explicit user request — was showing every
+          // fresh session with no memory of a prior dismissal, felt like
+          // it was "forcing" install on people who just want the browser.
+          // Now respects a permanent dismiss.
+          if (localStorage.getItem('sn_install_dismissed') !== '1') {
+            document.getElementById('iBanner').classList.add('on');
+          }
         });
         document.getElementById('iBannerBtn').onclick = () => {
           if (S.install) { S.install.prompt(); S.install.userChoice.then(() => document.getElementById('iBanner').classList.remove('on')); }
@@ -1068,6 +694,11 @@
         this.go('home');
         this.startBanner();
         this.initFocusMode();
+        // Seed tag registry from existing transaction history (runs once —
+        // migrateTagsToRegistry's own registry._migrated guard handles
+        // idempotency across every call to launch()). Moved here from
+        // module-load time — see the bugfix comment above _guardAPP(APP).
+        try { migrateTagsToRegistry(); } catch(e) { console.warn("[catch]", e); }
         setTimeout(() => this._checkBrowserNudge(), 800);
         setTimeout(() => this._check7DayBackupWarning(), 2200);
       },
@@ -1978,9 +1609,9 @@
         txns.forEach(t => { const mk = t.month || 'Unknown'; mHistory[mk] = (mHistory[mk] || 0) + t.amount; });
         const mEntries = Object.entries(mHistory).slice(-4);
         const mMax = Math.max(...mEntries.map(([, v]) => v), 1);
-        const nowShort = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+        const nowShort = offsetMonthStr(0);
 
-        const overviewHtml = `
+        const overviewHtml = `<div class="ins-overview-grid">
       <!-- MONTHLY HISTORY -->
       ${mEntries.length > 1 ? `<div class="ins-card">
         <div class="ins-card-title">MONTH BY MONTH</div>
@@ -2032,7 +1663,8 @@
             </div>
           </div>`;
         } catch(e) { return ''; }
-      })()}`;
+      })()}
+    </div>`;
 
         // ── MONTH-WISE SECTIONS — personality/sharp-insight/stats/buckets/
         // top-bucket/heaviest-week/day-of-week all recompute scoped to ONE
@@ -2354,9 +1986,25 @@
           // AI cards are persistent singletons — park them hidden instead of
           // deleting, so aiRenderX() can still find and update them later.
           [...c.children].forEach(ch => {
-            if (sourceIds.includes(ch.id)) return;
-            if (ch.id && (ch.id.indexOf('ai') === 0 || ch.id === 'hHero')) { ch.style.display = 'none'; document.body.appendChild(ch); }
-            else ch.remove();
+            const isAiCard = ch.id && (ch.id.indexOf('ai') === 0 || ch.id === 'hHero');
+            if (isAiCard) {
+              if (sourceIds.includes(ch.id)) return; // still wanted this cycle, keep in place
+              ch.style.display = 'none'; document.body.appendChild(ch); // no longer wanted, park it
+            } else {
+              // v7.1 bugfix: bucket/hint slides get the SAME id string every
+              // single r_home() (positional — 'hBucketSlide'+i), even though
+              // they're brand-new DOM nodes each time. The old check here
+              // was `if (sourceIds.includes(ch.id)) return;` — since that's
+              // ALWAYS true for these (same id scheme every render), it kept
+              // returning early and never removed the stale old copy, so
+              // every render appended another full set on top without
+              // clearing the last one. Confirmed via real-browser testing:
+              // one add-transaction cycle took the bucket grid from 4 cards
+              // to 8, with the OLD (stale-total) set still visible alongside
+              // the new one. Unconditional remove here is correct — a fresh
+              // replacement is appended right below regardless.
+              ch.remove();
+            }
           });
           sourceIds.forEach(id => {
             const src = document.getElementById(id);
@@ -2375,6 +2023,30 @@
             const idx = Math.round(c.scrollLeft / (c.clientWidth * 0.9));
             [...dots.children].forEach((d,i) => d.classList.toggle('on', i === Math.min(idx, n-1)));
           };
+
+          // v7.0-responsive: explicit user request — cards should move
+          // continuously, not sit static waiting for a manual swipe.
+          // Auto-advances every 4s; pauses for 8s after the user touches/
+          // drags the carousel themselves, so it never fights a manual
+          // swipe. Skipped entirely under prefers-reduced-motion. Cleans
+          // up its own prior interval first — buildCarousel() re-runs on
+          // every r_home(), so without this, timers would silently pile
+          // up across renders.
+          if (c._autoAdvanceTimer) clearInterval(c._autoAdvanceTimer);
+          const isMatrixGrid = window.matchMedia('(min-width: 768px)').matches;
+          if (n > 1 && !isMatrixGrid && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            let pausedUntil = 0;
+            const advance = () => {
+              if (Date.now() < pausedUntil || document.hidden) return;
+              const slideW = c.clientWidth * 0.9;
+              const atEnd = c.scrollLeft >= c.scrollWidth - c.clientWidth - 4;
+              c.scrollTo({ left: atEnd ? 0 : c.scrollLeft + slideW, behavior: 'smooth' });
+            };
+            c._autoAdvanceTimer = setInterval(advance, 4000);
+            const pause = () => { pausedUntil = Date.now() + 8000; };
+            c.addEventListener('touchstart', pause, { passive: true });
+            c.addEventListener('pointerdown', pause);
+          }
         };
 
         // v6.10: ONE carousel only — was two stacked (Section 1 + Section 2),
@@ -2408,7 +2080,7 @@
 
       toggleInsightMonth(mon) {
         if (!S.insExpanded) S.insExpanded = {};
-        const nowKey = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+        const nowKey = offsetMonthStr(0);
         S.insExpanded[mon] = !(S.insExpanded[mon] !== undefined ? S.insExpanded[mon] : (mon === nowKey));
         const safeKey = mon.replace(/\s+/g, '-');
         const b = document.getElementById('insgrp-body-' + safeKey);
@@ -2652,7 +2324,7 @@
         }
 
         const BUCKET_ORDER = ['necessary','committed','comfortable','luxury'];
-        const nowMonKey = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+        const nowMonKey = offsetMonthStr(0);
 
         const txnCard = (t) => {
           const cfg = t.bucket ? BUCKETS[t.bucket] : null;
@@ -2723,7 +2395,7 @@
               return (ai===-1?99:ai)-(bi===-1?99:bi);
             });
           }
-          return `<div>
+          return `<div class="mgrp">
             <div class="mgrp-hdr" onclick="APP.toggleMonthGroup('${esc(mon)}')" style="cursor:pointer;user-select:none">
               <div class="mgrp-nm"><span id="mgrp-arrow-${safeKey}" style="margin-right:6px;font-size:12px">${arrow}</span>${esc(mon)}</div>
               <div class="mgrp-tot">${fmtF(grpTotal)}</div>
@@ -2771,30 +2443,13 @@
         });
         // FIX-6C: swipe gestures — HR-03: cleanup old listeners before re-attaching
         if (listEl._swipeCleanup) listEl._swipeCleanup();
-        (function initSwipeActions(container) {
-          let startX=0,startY=0,activeWrap=null; // LW-02: let not var
-          function onSwipeStart(e){startX=e.touches[0].clientX;startY=e.touches[0].clientY;activeWrap=e.target.closest('.htxn-wrap');}
-          function onSwipeEnd(e){
-            if(!activeWrap)return;
-            const dx=e.changedTouches[0].clientX-startX,dy=Math.abs(e.changedTouches[0].clientY-startY);
-            if(dy>30)return;
-            if(dx<-50){container.querySelectorAll('.htxn-wrap.swiped').forEach(function(w){if(w!==activeWrap)w.classList.remove('swiped');});activeWrap.classList.add('swiped');}
-            else if(dx>20){activeWrap.classList.remove('swiped');}
-          }
-          function onSwipeClear(e){if(!e.target.closest('.htxn-wrap.swiped'))container.querySelectorAll('.htxn-wrap.swiped').forEach(function(w){w.classList.remove('swiped');});}
-          container.addEventListener('touchstart',onSwipeStart,{passive:true});
-          container.addEventListener('touchend',onSwipeEnd,{passive:true});
-          container.addEventListener('touchstart',onSwipeClear,{passive:true});
-          container._swipeCleanup = function(){
-            container.removeEventListener('touchstart',onSwipeStart);
-            container.removeEventListener('touchend',onSwipeEnd);
-            container.removeEventListener('touchstart',onSwipeClear);
-          };
-        })(listEl);
+        // initSwipeActions moved to js/ui/common/swipe-actions.js (batch 8) —
+        // was an inline IIFE here, now a named function called with the same arg.
+        initSwipeActions(listEl);
       },
       toggleMonthGroup(mon) {
         if (!S.histExpanded) S.histExpanded = {};
-        S.histExpanded[mon] = !( S.histExpanded[mon] !== undefined ? S.histExpanded[mon] : (mon === new Date().toLocaleDateString('en-IN',{month:'short',year:'numeric'})) );
+        S.histExpanded[mon] = !( S.histExpanded[mon] !== undefined ? S.histExpanded[mon] : (mon === offsetMonthStr(0)) );
         const safeKey = mon.replace(/\s+/g,'-');
         const body = document.getElementById('mgrp-body-' + safeKey);
         const arrow = document.getElementById('mgrp-arrow-' + safeKey);
@@ -3032,9 +2687,13 @@
         _addTags = []; // reset tag session on every Add Spend open (U-007, U-008)
         const ai = document.getElementById('addAmt'); if (ai) ai.value = '';
         const di = document.getElementById('addDesc'); if (di) di.value = '';
-        // BUG-15: pre-fill today's date, user can edit
+        // BUG-15: pre-fill today's date, user can edit. v7.1: ISO format
+        // (YYYY-MM-DD) — what a native <input type="date"> requires.
         const dateEl = document.getElementById('addDate');
-        if (dateEl) dateEl.value = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        if (dateEl) {
+          const t = new Date();
+          dateEl.value = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+        }
         document.getElementById('srcGrid').innerHTML = SRCS.map(s =>
           `<div class="src" data-s="${s.k}" onclick="APP.selSrc('${s.k}')" style="flex:1;padding:10px 6px;border-radius:12px;border-width:1.5px;border-style:solid;border-color:var(--fog);background:var(--card);cursor:pointer;text-align:center;transition:all .12s">
         <div style="font-size:14px;font-weight:700;color:var(--slate)">${s.i}</div>
@@ -3115,7 +2774,7 @@
         S.saveBusy = true;
         try {
           const now = new Date();
-          const picked = _parseDateInput(document.getElementById('addDate')?.value);
+          const picked = _parseISODate(document.getElementById('addDate')?.value);
           D.transactions = [{ id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: now.toISOString(), date: picked.date, time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), month: picked.month, merchant: desc || 'Manual Entry', amount: amt, bucket: S.addBkt, source: S.addSrc, tags: [..._addTags] }, ...(D.transactions || [])];
           DB.save(D); this.markUnsaved();
           this.checkBackupReminder();
@@ -3769,7 +3428,7 @@
               sd.sources.unshift({
                 id: `src_cf_${Date.now()}`,
                 timestamp: now.toISOString(),
-                date: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                date: String(now.getDate()).padStart(2,'0') + ' ' + MONTH_ABBR[now.getMonth()] + ' ' + now.getFullYear(),
                 month: currentMonth,
                 name: 'Carried Forward',
                 amount: carryAmt,
@@ -3871,7 +3530,7 @@
       openAddSource(prefill) {
         const isEdit = !!prefill;
         const now = new Date();
-        const defaultDate = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const defaultDate = String(now.getDate()).padStart(2,'0') + ' ' + MONTH_ABBR[now.getMonth()] + ' ' + now.getFullYear();
 
         modal(
           isEdit ? 'Edit Source' : '+ Add Source',
@@ -3923,7 +3582,7 @@
                   sd.sources.unshift({
                     id: `src_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                     timestamp: entryNow.toISOString(),
-                    date: entryNow.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                    date: String(entryNow.getDate()).padStart(2,'0') + ' ' + MONTH_ABBR[entryNow.getMonth()] + ' ' + entryNow.getFullYear(),
                     month: offsetMonthStr(0),
                     name,
                     amount: amt,
@@ -4053,642 +3712,35 @@
     // Returns {bkt, confidence, matchedDesc} or null
     // confidence: 3=exact, 2=contains, 1=word-overlap
     // MQ-03: merchant index — built once, invalidated on new transactions
-    let _merchantIndex = null;
-    function _getMerchantIndex() {
-      if (_merchantIndex) return _merchantIndex;
-      _merchantIndex = {};
-      for (const t of (D && D.transactions ? D.transactions : [])) {
-        if (!t.merchant) continue;
-        const k = t.merchant.toLowerCase();
-        if (!_merchantIndex[k]) _merchantIndex[k] = t;
-      }
-      return _merchantIndex;
-    }
-    function _invalidateMerchantIndex() { _merchantIndex = null; }
+    // _getMerchantIndex/_invalidateMerchantIndex/_levenshtein/_normMerchantKey/
+    // _computeNormalizeConflicts/_suggestMerchantName/_findHistoryMerchant moved
+    // to js/bal/common/merchant-matching.js (batch 6).
 
-    // ── MN-01: MERCHANT NAME NORMALISATION ────────────────────────────
-    // Small Levenshtein distance — good enough for short merchant strings
-    function _levenshtein(a, b) {
-      a = a || ''; b = b || '';
-      if (a === b) return 0;
-      const m = a.length, n = b.length;
-      if (m === 0) return n;
-      if (n === 0) return m;
-      let prev = Array.from({ length: n + 1 }, (_, i) => i);
-      for (let i = 1; i <= m; i++) {
-        const cur = [i];
-        for (let j = 1; j <= n; j++) {
-          cur[j] = a[i - 1] === b[j - 1]
-            ? prev[j - 1]
-            : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
-        }
-        prev = cur;
-      }
-      return prev[n];
-    }
-    // ═══════════════════════════════════════════════════
-    // NORMALIZE — v6.4
-    // Finds records that SHOULD be treated the same but aren't:
-    // (1) same tag, different bucket (e.g. #coffee sometimes Necessary,
-    //     sometimes Comfortable — the user's own example)
-    // (2) same/near-identical merchant name, different bucket
-    // (3) near-identical merchant spelling (e.g. "Maiyya Coffee" vs
-    //     "Maiyas Coffee" — a typo, not two different places)
-    // Returns a flat list of conflict groups; nothing is written to D until
-    // the user reviews and confirms in r_normalize()/applyNormalize().
-    // ═══════════════════════════════════════════════════
-    function _normMerchantKey(s) { return (s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
-
-    function _computeNormalizeConflicts() {
-      const txns = (D.transactions || []).filter(t => t.merchant);
-      const conflicts = [];
-
-      // ---- PASS 1: TAG GROUPS — same tag, different bucket ----
-      const byTag = {};
-      txns.forEach(t => {
-        (t.tags || []).forEach(tag => {
-          if (!byTag[tag]) byTag[tag] = [];
-          byTag[tag].push(t);
-        });
-      });
-      Object.entries(byTag).forEach(([tag, group]) => {
-        if (group.length < 2) return;
-        const bucketCounts = {};
-        group.forEach(t => { const b = t.bucket || '(unsorted)'; bucketCounts[b] = (bucketCounts[b] || 0) + 1; });
-        if (Object.keys(bucketCounts).length < 2) return; // all agree — not a conflict
-        const sorted = Object.entries(bucketCounts).sort((a, b) => b[1] - a[1]);
-        conflicts.push({
-          type: 'tag-bucket',
-          label: `#${tag}`,
-          field: 'bucket',
-          txnIds: group.map(t => t.id),
-          options: sorted.map(([v, c]) => ({ value: v, count: c })),
-          recommended: sorted[0][0]
-        });
-      });
-
-      // ---- PASS 2: MERCHANT FUZZY CLUSTERS ----
-      // Greedy clustering: same idea as _suggestMerchantName below, applied
-      // across the whole dataset instead of one freshly-typed name at a time.
-      const uniqueMerchants = [...new Set(txns.map(t => _normMerchantKey(t.merchant)))];
-      const clusters = [];
-      uniqueMerchants.forEach(name => {
-        let found = null;
-        for (const c of clusters) {
-          if (c.some(rep => rep === name || (_levenshtein(rep, name) <= 2 && Math.min(rep.length, name.length) > 3))) {
-            found = c; break;
-          }
-        }
-        if (found) found.push(name);
-        else clusters.push([name]);
-      });
-
-      clusters.forEach(reps => {
-        const members = txns.filter(t => reps.includes(_normMerchantKey(t.merchant)));
-        if (members.length < 2) return;
-
-        // (2a) spelling conflict — more than one distinct spelling in this cluster
-        const nameCounts = {};
-        members.forEach(t => { const nm = t.merchant.trim(); nameCounts[nm] = (nameCounts[nm] || 0) + 1; });
-        const distinctNames = Object.keys(nameCounts);
-        if (distinctNames.length > 1) {
-          const sorted = Object.entries(nameCounts).sort((a, b) => b[1] - a[1]);
-          conflicts.push({
-            type: 'merchant-name',
-            label: distinctNames.join(' / '),
-            field: 'merchant',
-            txnIds: members.map(t => t.id),
-            options: sorted.map(([v, c]) => ({ value: v, count: c })),
-            recommended: sorted[0][0]
-          });
-        }
-
-        // (2b) bucket conflict within this merchant cluster
-        const bucketCounts = {};
-        members.forEach(t => { const b = t.bucket || '(unsorted)'; bucketCounts[b] = (bucketCounts[b] || 0) + 1; });
-        if (Object.keys(bucketCounts).length > 1) {
-          const sorted = Object.entries(bucketCounts).sort((a, b) => b[1] - a[1]);
-          conflicts.push({
-            type: 'merchant-bucket',
-            label: distinctNames[0] || reps[0],
-            field: 'bucket',
-            txnIds: members.map(t => t.id),
-            options: sorted.map(([v, c]) => ({ value: v, count: c })),
-            recommended: sorted[0][0]
-          });
-        }
-
-        // (2c) tag conflict — using each record's first/primary tag as the
-        // representative value (keeps this simple rather than diffing full sets)
-        const tagCounts = {};
-        members.forEach(t => { const tg = (t.tags && t.tags[0]) || '(none)'; tagCounts[tg] = (tagCounts[tg] || 0) + 1; });
-        if (Object.keys(tagCounts).length > 1) {
-          const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
-          conflicts.push({
-            type: 'merchant-tag',
-            label: distinctNames[0] || reps[0],
-            field: 'tag',
-            txnIds: members.map(t => t.id),
-            options: sorted.map(([v, c]) => ({ value: v, count: c })),
-            recommended: sorted[0][0]
-          });
-        }
-      });
-
-      return conflicts;
-    }
-
-    // Suggest a canonical merchant name for a freshly-typed one.
-    // Ignores exact matches (distance 0) and merchants with < 3 uses (merchantNorm gotcha).
-    function _suggestMerchantName(typed) {
-      const t = (typed || '').trim();
-      if (t.length < 3) return null;
-      const tLower = t.toLowerCase();
-      const counts = {};
-      (D.transactions || []).forEach(x => {
-        const m = (x.merchant || '').trim();
-        if (!m) return;
-        const k = m.toLowerCase();
-        counts[k] = counts[k] || { name: m, count: 0 };
-        counts[k].count++;
-      });
-      let best = null, bestDist = Infinity;
-      Object.keys(counts).forEach(k => {
-        if (k === tLower) return; // exact match — nothing to suggest
-        if (counts[k].count < 3) return; // not established enough to trust
-        const dist = _levenshtein(tLower, k);
-        if (dist > 0 && dist <= 2 && dist < bestDist) { bestDist = dist; best = counts[k].name; }
-      });
-      return best;
-    }
-
-    function _findHistoryMerchant(desc) {
-      if (!desc || !D || !D.transactions || D.transactions.length === 0) return null;
-      const needle = desc.toLowerCase().trim();
-      if (needle.length < 2) return null;
-
-      let best = null;
-
-      const txns = D.transactions;
-      for (const t of txns) {
-        if (!t.merchant || !t.bucket) continue;
-        const hay = t.merchant.toLowerCase().trim();
-        let confidence = 0;
-
-        if (hay === needle) {
-          confidence = 3; // exact match
-        } else if ((hay.includes(needle) || needle.includes(hay)) && Math.min(hay.length, needle.length) >= 4) {
-          // v6.13: added the length guard — without it, a short past merchant
-          // name (or a short voice-transcribed desc) could substring-match
-          // something completely unrelated purely by coincidence, and pull in
-          // that unrelated transaction's entire tag set along with it.
-          confidence = 2; // substring match
-        } else {
-          // word overlap
-          const needleWords = needle.split(/\s+/).filter(w => w.length > 2);
-          const hayWords = hay.split(/\s+/).filter(w => w.length > 2);
-          const overlap = needleWords.filter(w => hayWords.includes(w)).length;
-          if (overlap > 0) confidence = 1;
-        }
-
-        if (confidence > 0) {
-          if (!best || confidence > best.confidence) {
-            best = { bkt: t.bucket, confidence, matchedDesc: t.merchant, tags: t.tags || [] };
-          }
-          if (best.confidence === 3) break; // exact — no need to continue
-        }
-      }
-
-      return best;
-    }
 
     // ── PARSE NLT (natural language text) ────────────────────────────
     // Returns {amt, desc, bkt, src, suggestedTags, learnedFromHistory, historyInfo} or null
-    function aiParseText(raw) {
-      if (!raw || raw.trim().length < 2) return null;
-      const text = raw.trim();
-
-      // 1. Extract amount — look for number patterns
-      let amt = null;
-      const amtPatterns = [
-        /(?:rs\.?|₹|inr)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-        /([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:rs\.?|₹|rupees?)/i,
-        /^([0-9,]+(?:\.[0-9]{1,2})?)\s/,        // starts with number
-        /\s([0-9,]+(?:\.[0-9]{1,2})?)$/,         // ends with number
-        /([0-9,]+(?:\.[0-9]{1,2})?)/,             // any number
-      ];
-      for (const p of amtPatterns) {
-        const m = text.match(p);
-        if (m) { const v = parseFloat(m[1].replace(/,/g,'')); if (v > 0 && v < MAX_AMT) { amt = v; break; } }
-      }
-      if (!amt) return null;
-
-      // 2. Extract description — remove amount and common filler words
-      let desc = text
-        .replace(/(?:rs\.?|₹|inr)\s*[0-9,]+(?:\.[0-9]{1,2})?/gi, '')
-        .replace(/[0-9,]+(?:\.[0-9]{1,2})?\s*(?:rs\.?|₹|rupees?)/gi, '')
-        .replace(/^[0-9,]+(?:\.[0-9]{1,2})?/, '')
-        .replace(/[0-9,]+(?:\.[0-9]{1,2})?$/, '')
-        .replace(/\b(spent|spend|paid|pay|on|for|at|to|towards|bought|purchase|today|yesterday|just|the|a|an)\b/gi, ' ')
-        .replace(/\s+/g, ' ').trim();
-      if (!desc) desc = 'Spend';
-      // Title-case first letter
-      desc = desc.charAt(0).toUpperCase() + desc.slice(1);
-
-      // 3. Auto-categorize bucket — history lookup first
-      const lower = text.toLowerCase();
-      let bkt = null;
-      let learnedFromHistory = false;
-      let historyInfo = null;
-      let suggestedTags = [];
-
-      const historyMatch = _findHistoryMerchant(desc);
-      if (historyMatch && historyMatch.confidence >= 2) {
-        bkt = historyMatch.bkt;
-        learnedFromHistory = true;
-        historyInfo = historyMatch;
-        // v6.13: was `historyMatch.confidence >= 2` guard on the bucket only —
-        // tags were pulled in at ANY confidence including the loose word-overlap
-        // tier (confidence 1), which is exactly what let an unrelated past
-        // merchant's tags ride along (e.g. "coffee" overlapping a completely
-        // different transaction that also happened to contain that word).
-        // Tags now require the same >=2 (exact/substring) bar as the bucket.
-        if (historyMatch.tags && historyMatch.tags.length > 0) {
-          suggestedTags = [...new Set(historyMatch.tags)];
-        }
-      }
-
-      // Fall back to merchant map
-      if (!bkt) {
-        for (const [merchant, b] of Object.entries(AI_MERCHANT_MAP)) {
-          if (lower.includes(merchant)) { bkt = b; break; }
-        }
-      }
-      // Then keyword scoring
-      if (!bkt) {
-        const scores = {necessary:0, committed:0, comfortable:0, luxury:0};
-        for (const [b, kws] of Object.entries(AI_BKT_KEYWORDS)) {
-          for (const kw of kws) { if (lower.includes(kw)) scores[b] += 1; }
-        }
-        const best = Object.entries(scores).sort((a,b)=>b[1]-a[1])[0];
-        if (best[1] > 0) bkt = best[0];
-      }
-      if (!bkt) bkt = 'necessary'; // safe default
-
-      // 4. Source — use last used, default to upi
-      const src = (S && S.addSrc) || (D && D.lastSrc) || 'upi';
-
-      return { amt, desc, bkt, src, suggestedTags, learnedFromHistory, historyInfo };
-    }
+    // aiParseText moved to js/bal/ai-insights/ (batch 7).
 
     // ── SHOW AI CONFIRMATION CARD ────────────────────────────────────
-    function aiShowConfirm(parsed) {
-      // OCR-FIX-002: fill date field, call valAdd() to enable Save button
-      if (!parsed) return;
-      AI.parsed = parsed;
-      const card = document.getElementById('aiConfirmCard');
-      const saveBtn = document.getElementById('aiSaveBtn');
-      if (!card) return;
-      const cfAmt = document.getElementById('aiCfAmt');
-      const cfDesc = document.getElementById('aiCfDesc');
-      const cfBkt = document.getElementById('aiCfBkt');
-      const cfSrc = document.getElementById('aiCfSrc');
-      if (cfAmt) cfAmt.textContent = '₹' + parsed.amt.toLocaleString('en-IN');
-      if (cfDesc) cfDesc.textContent = parsed.desc;
-
-      // Show learned badge on bucket chip
-      let bktLabel = BUCKETS[parsed.bkt] ? BUCKETS[parsed.bkt].g + ' ' + BUCKETS[parsed.bkt].l : parsed.bkt;
-      if (parsed.learnedFromHistory) {
-        bktLabel += ' <span style="font-size:10px;font-weight:700;color:var(--teal);background:var(--tealL);padding:2px 6px;border-radius:8px;margin-left:4px">✦ learned</span>';
-        if (cfBkt) cfBkt.innerHTML = bktLabel;
-      } else {
-        if (cfBkt) cfBkt.textContent = bktLabel;
-      }
-
-      const srcObj = SRCS.find(s => s.k === parsed.src);
-      if (cfSrc) cfSrc.textContent = srcObj ? srcObj.i + ' ' + srcObj.l : parsed.src;
-      card.style.display = 'block';
-      if (saveBtn) saveBtn.style.display = 'block';
-      // Pre-fill manual form fields
-      const amtEl = document.getElementById('addAmt');
-      const descEl = document.getElementById('addDesc');
-      const dateEl = document.getElementById('addDate');
-      if (amtEl) amtEl.value = parsed.amt;
-      if (descEl) descEl.value = parsed.desc;
-      // Fill date if extracted from receipt — OCR-FIX-002
-      if (dateEl && parsed.date) dateEl.value = parsed.date;
-      // Show date row in confirm card if date was extracted
-      const cfDateRow = document.getElementById('aiCfDateRow');
-      const cfDate = document.getElementById('aiCfDate');
-      if (cfDateRow && cfDate) {
-        if (parsed.date) { cfDate.textContent = parsed.date; cfDateRow.style.display = 'flex'; }
-        else { cfDateRow.style.display = 'none'; }
-      }
-
-      // Auto-apply learned tags from history
-      if (parsed.suggestedTags && parsed.suggestedTags.length > 0) {
-        for (const tag of parsed.suggestedTags) {
-          if (!_addTags.includes(tag)) _addTags.push(tag);
-        }
-        if (APP.renderAddTagChips) APP.renderAddTagChips();
-      }
-
-      // Show history info in status (IMP-4: smart amount suggest + learned badge)
-      const status = document.getElementById('aiStatus');
-      const lastAmt = _getLastAmount(parsed.desc);
-      if (status && parsed.learnedFromHistory && parsed.historyInfo) {
-        const count = (D && D.transactions ? D.transactions.filter(t => t.merchant && t.merchant.toLowerCase() === parsed.desc.toLowerCase()).length : 0);
-        const learnedMsg = count > 0
-          ? `✦ Learned from your history (${count} record${count>1?'s':''})`
-          : '✦ Learned from your history';
-        const amtHint = lastAmt && lastAmt !== parsed.amt ? ` · Last time: ${fmtF(lastAmt)}` : '';
-        status.textContent = learnedMsg + amtHint;
-      } else if (status && lastAmt && lastAmt !== parsed.amt) {
-        status.textContent = `Last time at ${parsed.desc}: ${fmtF(lastAmt)}`;
-      }
-
-      APP.selBkt(parsed.bkt);
-      APP.selSrc(parsed.src);
-      // Enable the Save button — OCR-FIX-003: valAdd() was never called after pre-fill
-      if (APP.valAdd) APP.valAdd();
-    }
+    // aiShowConfirm moved to js/bal/ai-insights/ (batch 7).
 
     // ── CLEAR AI STATE ───────────────────────────────────────────────
-    function aiClear() {
-      AI.parsed = null;
-      const card = document.getElementById('aiConfirmCard');
-      const saveBtn = document.getElementById('aiSaveBtn');
-      const status = document.getElementById('aiStatus');
-      if (card) card.style.display = 'none';
-      if (saveBtn) saveBtn.style.display = 'none';
-      if (status) status.textContent = '';
-    }
+    // aiClear moved to js/bal/ai-insights/ (batch 7).
 
     // ── AI REACTION after save ───────────────────────────────────────
-    function aiReaction(amt, desc, bkt, transactions) {
-      const txns = transactions || [];
-      const lower = (desc || '').toLowerCase();
-      const now = new Date();
-      const hour = now.getHours();
-      const currentMonth = offsetMonthStr(0);
-      const monthTxns = txns.filter(t => t.month === currentMonth);
-
-      // Pattern 0: merchant frequency alert (IMP-3)
-      const freqAlert = _merchantFreqAlert(desc, txns);
-      if (freqAlert) return freqAlert;
-
-      // Pattern 1: same merchant this week
-      const weekAgo = Date.now() - WEEK_MS;
-      const sameRecent = txns.filter(t =>
-        t.merchant && t.merchant.toLowerCase() === lower &&
-        new Date(t.timestamp).getTime() > weekAgo
-      ).length;
-      if (sameRecent >= 2 && lower.length > 2) {
-        const emoji = ico(desc);
-        return `${emoji} ${desc} — ${sameRecent + 1}rd time this week!`;
-      }
-
-      // Pattern 2: biggest spend this month
-      const monthAmts = monthTxns.map(t => t.amount);
-      if (monthAmts.length > 0 && amt > Math.max(...monthAmts)) {
-        return `Biggest spend this month — hope it was worth it! 🎯`;
-      }
-
-      // Pattern 3: late night
-      if (hour >= 22 || hour < 4) {
-        return `Late night ₹${amt.toLocaleString('en-IN')} logged 🌙`;
-      }
-
-      // Pattern 4: under budget
-      if (bkt && D.limits && D.limits[bkt] > 0) {
-        const spent = monthTxns.filter(t => t.bucket === bkt).reduce((s,t) => s + t.amount, 0);
-        const lim = D.limits[bkt];
-        if (spent + amt < lim * 0.5) {
-          return `Nice — well within your ${BUCKETS[bkt]?.l || bkt} budget 👏`;
-        }
-      }
-
-      // Pattern 5: first spend today
-      const today = now.toLocaleDateString('en-IN', {day:'2-digit', month:'short'});
-      const todayTxns = txns.filter(t => t.date === today);
-      if (todayTxns.length === 0) {
-        return `First spend of the day logged ✓`;
-      }
-
-      // Pattern 6: round number
-      if (amt % 500 === 0 && amt >= 500) {
-        return `₹${amt.toLocaleString('en-IN')} — a satisfyingly round number 😄`;
-      }
-
-      // Default
-      return `₹${amt.toLocaleString('en-IN')} saved to ${BUCKETS[bkt]?.l || bkt} ✓`;
-    }
+    // aiReaction moved to js/bal/ai-insights/ (batch 7).
 
     // ── AI INSIGHT (weekly, home screen) ─────────────────────────────
-    function aiGenerateInsight() {
-      const txns = D.transactions || [];
-      if (txns.length < 5) return null;
-
-      const currentMonth = offsetMonthStr(0);
-      const prevMonth = offsetMonthStr(-1);
-      const monthTxns = txns.filter(t => t.month === currentMonth);
-      const prevTxns = txns.filter(t => t.month === prevMonth);
-
-      const insights = [];
-
-      // Weekend vs weekday spending
-      const weekendTxns = monthTxns.filter(t => { const d = new Date(t.timestamp); return d.getDay() === 0 || d.getDay() === 6; });
-      const weekdayTxns = monthTxns.filter(t => { const d = new Date(t.timestamp); return d.getDay() > 0 && d.getDay() < 6; });
-      if (weekendTxns.length > 2 && weekdayTxns.length > 2) {
-        const wkndAvg = weekendTxns.reduce((s,t)=>s+t.amount,0) / weekendTxns.length;
-        const wkdayAvg = weekdayTxns.reduce((s,t)=>s+t.amount,0) / weekdayTxns.length;
-        if (wkndAvg > wkdayAvg * 1.3) {
-          insights.push(`You spend ${Math.round((wkndAvg/wkdayAvg-1)*100)}% more on weekends — ₹${Math.round(wkndAvg).toLocaleString('en-IN')} avg vs ₹${Math.round(wkdayAvg).toLocaleString('en-IN')} weekdays`);
-        }
-      }
-
-      // Fastest growing bucket vs last month
-      if (prevTxns.length > 0) {
-        let biggestGrowth = null, biggestPct = 0;
-        for (const bk of Object.keys(BUCKETS)) {
-          const cur = monthTxns.filter(t=>t.bucket===bk).reduce((s,t)=>s+t.amount,0);
-          const prev = prevTxns.filter(t=>t.bucket===bk).reduce((s,t)=>s+t.amount,0);
-          if (prev > 0 && cur > prev) {
-            const pct = ((cur - prev) / prev) * 100;
-            if (pct > biggestPct) { biggestPct = pct; biggestGrowth = bk; }
-          }
-        }
-        if (biggestGrowth && biggestPct > 20) {
-          insights.push(`${BUCKETS[biggestGrowth].l} is your fastest growing spend — up ${Math.round(biggestPct)}% from last month`);
-        }
-      }
-
-      // Logging streak
-      const daySet = new Set(monthTxns.map(t => t.date));
-      const today = new Date().getDate();
-      if (daySet.size >= today * 0.7 && daySet.size >= 5) {
-        insights.push(`${daySet.size} days logged this month — you're building a solid habit 🔥`);
-      }
-
-      // Best month ever
-      const monthTotals = {};
-      txns.forEach(t => { if (t.month) monthTotals[t.month] = (monthTotals[t.month]||0) + t.amount; });
-      const sortedMonths = Object.entries(monthTotals).sort((a,b)=>a[1]-b[1]);
-      if (sortedMonths.length >= 3) {
-        const [bestMonth, bestAmt] = sortedMonths[0];
-        if (bestMonth !== currentMonth) {
-          insights.push(`Your most disciplined month was ${bestMonth} — ₹${Math.round(bestAmt).toLocaleString('en-IN')} total. Can you beat it?`);
-        }
-      }
-
-      // Most frequent merchant
-      const merchantCount = {};
-      monthTxns.forEach(t => { if (t.merchant && t.merchant !== 'Manual Entry') merchantCount[t.merchant] = (merchantCount[t.merchant]||0)+1; });
-      const topMerchant = Object.entries(merchantCount).sort((a,b)=>b[1]-a[1])[0];
-      if (topMerchant && topMerchant[1] >= 3) {
-        insights.push(`${topMerchant[0]} appears ${topMerchant[1]} times this month — your most frequent spend`);
-      }
-
-      if (insights.length === 0) return null;
-      // Pick one insight — rotate by week number
-      const weekNum = Math.floor(Date.now() / (WEEK_MS));
-      return insights[weekNum % insights.length];
-    }
+    // aiGenerateInsight moved to js/bal/ai-insights/ (batch 7).
 
     // ── SPEND FORECAST ───────────────────────────────────────────────
-    function aiGenerateForecast() {
-      const txns = D.transactions || [];
-      const currentMonth = offsetMonthStr(0);
-      const now = new Date();
-      const dayOfMonth = now.getDate();
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-      if (dayOfMonth < 5) return null; // not enough data
-
-      const monthTxns = txns.filter(t => t.month === currentMonth);
-      if (monthTxns.length < 3) return null;
-
-      const spent = monthTxns.reduce((s,t)=>s+t.amount,0);
-      const projected = Math.round((spent / dayOfMonth) * daysInMonth);
-
-      // Comfortable range from last 3 months
-      const ranges = [];
-      for (let i = 1; i <= 3; i++) {
-        const m = offsetMonthStr(-i);
-        const mTotal = txns.filter(t=>t.month===m).reduce((s,t)=>s+t.amount,0);
-        if (mTotal > 0) ranges.push(mTotal);
-      }
-      const avgRange = ranges.length > 0 ? ranges.reduce((s,v)=>s+v,0)/ranges.length : 0;
-      const breathing = avgRange > 0 ? Math.round(avgRange * 1.1 - projected) : null;
-
-      let text = `₹${spent.toLocaleString('en-IN')} in ${dayOfMonth} days → projected ₹${projected.toLocaleString('en-IN')} by month end.`;
-      if (breathing !== null) {
-        if (breathing > 0) text += ` ~₹${breathing.toLocaleString('en-IN')} breathing room.`;
-        else text += ` ₹${Math.abs(breathing).toLocaleString('en-IN')} over your usual pace.`;
-      }
-
-      const pct = avgRange > 0 ? Math.min((projected / avgRange) * 100, 100) : Math.min((spent / (projected||1)) * 100, 100);
-      return { text, pct: Math.round(pct) };
-    }
+    // aiGenerateForecast moved to js/bal/ai-insights/ (batch 7).
 
     // ── MONTHLY STORY ────────────────────────────────────────────────
-    function aiGenerateStory(monthStr) {
-      const txns = (D.transactions || []).filter(t => t.month === monthStr);
-      if (txns.length < 3) return null;
-
-      const total = txns.reduce((s,t)=>s+t.amount,0);
-      const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toLocaleDateString('en-IN',{month:'short',year:'numeric'}); })();
-      const prevTxns = (D.transactions||[]).filter(t=>t.month===prevMonth);
-      const prevTotal = prevTxns.reduce((s,t)=>s+t.amount,0);
-
-      // Top bucket
-      let topBkt = null, topAmt = 0;
-      for (const bk of Object.keys(BUCKETS)) {
-        const a = txns.filter(t=>t.bucket===bk).reduce((s,t)=>s+t.amount,0);
-        if (a > topAmt) { topAmt = a; topBkt = bk; }
-      }
-
-      // Biggest single spend
-      const biggestTxn = txns.reduce((best,t) => t.amount > (best ? best.amount : 0) ? t : best, null);
-
-      // Weekend concentration
-      const weekendAmt = txns.filter(t=>{const d=new Date(t.timestamp);return d.getDay()===0||d.getDay()===6;}).reduce((s,t)=>s+t.amount,0);
-      const weekendPct = total > 0 ? Math.round((weekendAmt/total)*100) : 0;
-
-      // Budget check
-      const overBuckets = Object.keys(BUCKETS).filter(bk => {
-        const spent = txns.filter(t=>t.bucket===bk).reduce((s,t)=>s+t.amount,0);
-        return D.limits && D.limits[bk] > 0 && spent <= D.limits[bk];
-      });
-
-      // Build story sentences
-      const sentences = [];
-      const vsLast = prevTotal > 0 ? Math.round(((total-prevTotal)/prevTotal)*100) : null;
-      if (vsLast !== null) {
-        sentences.push(vsLast > 10 ? `${monthStr} was a heavier month — up ${vsLast}% from last month.` :
-                       vsLast < -10 ? `${monthStr} was a lean month — down ${Math.abs(vsLast)}% from last month.` :
-                       `${monthStr} was steady — spending stayed close to last month.`);
-      } else {
-        sentences.push(`${monthStr} had ${txns.length} recorded spends totalling ${fmtF(total)}.`);
-      }
-
-      if (topBkt) {
-        const topPct = Math.round((topAmt/total)*100);
-        sentences.push(`${BUCKETS[topBkt].l} was your biggest category at ${topPct}% of total spend.`);
-      }
-
-      if (biggestTxn && biggestTxn.amount > total * 0.15) {
-        sentences.push(`Biggest single spend: ${fmtF(biggestTxn.amount)} on ${biggestTxn.merchant}.`);
-      }
-
-      if (weekendPct > 40) {
-        sentences.push(`${weekendPct}% of spending happened on weekends.`);
-      }
-
-      if (overBuckets.length === 4) {
-        sentences.push(`You stayed within budget in all buckets — that's a win.`);
-      } else if (overBuckets.length >= 2) {
-        sentences.push(`You stayed within budget in ${overBuckets.length} out of 4 buckets.`);
-      }
-
-      // v5.0: Honest Comparison paragraph
-      try {
-        const comparison = generateHonestComparison(monthStr);
-        if (comparison) sentences.push(comparison);
-      } catch(e) { console.warn("[catch]", e); }
-
-      return sentences.join(' ');
-    }
+    // aiGenerateStory moved to js/bal/ai-insights/ (batch 7).
 
     // ── HONEST MIRROR ────────────────────────────────────────────────
-    function aiCheckMirror() {
-      const txns = D.transactions || [];
-      const limits = D.limits || {};
-      // Check last 3 months for consecutive overruns
-      for (const bk of Object.keys(BUCKETS)) {
-        if (!limits[bk] || limits[bk] <= 0) continue;
-        let streak = 0;
-        for (let i = 1; i <= 4; i++) {
-          const m = offsetMonthStr(-i);
-          const spent = txns.filter(t=>t.month===m&&t.bucket===bk).reduce((s,t)=>s+t.amount,0);
-          if (spent > limits[bk]) streak++; else break;
-        }
-        if (streak >= 2) {
-          // Check we haven't shown this recently
-          const shown = (() => { try { return JSON.parse(localStorage.getItem('sn_mirror_shown')||'{}'); } catch(e) { return {}; } })();
-          const thisMonth = offsetMonthStr(0);
-          if (shown[bk] === thisMonth) continue;
-          const newLimit = Math.round(limits[bk] * 1.3 / 100) * 100; // round to nearest 100
-          AI.mirrorBucket = bk;
-          AI.mirrorNewLimit = newLimit;
-          return {
-            bk,
-            text: `You've set a ${fmtF(limits[bk])} limit for ${BUCKETS[bk].l} but crossed it ${streak} months in a row. Want to set it to ${fmtF(newLimit)} and actually feel in control?`,
-            newLimit
-          };
-        }
-      }
-      return null;
-    }
+    // aiCheckMirror moved to js/bal/ai-insights/ (batch 7).
 
     // Inject all AI methods into APP object
     // (called once after APP is defined — extends APP in-place)
@@ -4716,114 +3768,17 @@
     }
 
     // ── SMART DUPLICATE DETECTOR ⚠️ ──────────────────────────────
-    function checkDuplicate(amount, merchant) {
-      if (!getAIConfig().duplicate) return null;
-      const cutoff = Date.now() - (15 * 60 * 1000);
-      return (D.transactions||[]).find(t => {
-        const tTime = new Date(t.timestamp||0).getTime();
-        return tTime > cutoff && Math.abs(t.amount - amount) < 2
-          && (t.merchant||'').toLowerCase() === (merchant||'').toLowerCase();
-      }) || null;
-    }
-
-    // ── SMART SEARCH SYNONYMS 🔎 ──────────────────────────────────
-    const SEARCH_SYNONYMS = {
-      food: ['swiggy','zomato','restaurant','cafe','lunch','dinner','breakfast','chai','coffee','meals','dhaba'],
-      travel: ['uber','ola','rapido','auto','petrol','fuel','bus','train','flight','cab','taxi','toll'],
-      medical: ['apollo','medical','pharmacy','chemist','hospital','doctor','clinic','medicine'],
-      shopping: ['amazon','flipkart','myntra','ajio','meesho','zepto','blinkit','instamart'],
-      bills: ['electricity','wifi','broadband','mobile','recharge','gas','water','society'],
-      kids: ['school','fees','tuition','books','uniform','stationery'],
-      entertainment: ['netflix','hotstar','prime','spotify','youtube','movie','theatre'],
-      groceries: ['vegetables','fruits','kirana','supermarket','dmart','reliance','bigbazaar'],
-    };
-    function expandSearchQuery(q) {
-      if (!getAIConfig().smartSearch || !q) return [q.toLowerCase()];
-      const lower = q.toLowerCase().trim();
-      const terms = new Set([lower]);
-      Object.entries(SEARCH_SYNONYMS).forEach(([key, synonyms]) => {
-        const allTerms = [key, ...synonyms];
-        if (allTerms.some(t => t.includes(lower) || lower.includes(t)))
-          allTerms.forEach(t => terms.add(t));
-      });
-      return [...terms];
-    }
+    // checkDuplicate moved to js/bal/common/duplicate-detection.js (batch 6).
+    // SEARCH_SYNONYMS/expandSearchQuery moved to js/bal/common/merchant-matching.js (batch 6).
 
     // ── SPEND TWIN 👫 ─────────────────────────────────────────────
-    function generateSpendTwin(currentMonthStr) {
-      if (!getAIConfig().spendTwin) return null;
-      const txns = D.transactions || [];
-      // single grouped pass instead of a filter() per month-per-bucket (was
-      // O(months x buckets x n), unbounded as account age grows — a 2-year
-      // history could mean 24 months x 4 buckets = 96 full-array scans here alone)
-      const byMonth = {};
-      txns.forEach(t => {
-        if (!byMonth[t.month]) byMonth[t.month] = {};
-        byMonth[t.month][t.bucket] = (byMonth[t.month][t.bucket] || 0) + t.amount;
-      });
-      const currentTxnsCount = txns.reduce((c,t) => c + (t.month === currentMonthStr ? 1 : 0), 0);
-      if (currentTxnsCount < 3) return null;
-      const current = byMonth[currentMonthStr] || {};
-      const currentTotal = Object.values(current).reduce((s,v)=>s+v,0);
-      if (currentTotal === 0) return null;
-      const pastMonths = Object.keys(byMonth).filter(m => m !== currentMonthStr);
-      if (pastMonths.length < 2) return null;
-      let bestMatch = null, bestScore = Infinity;
-      pastMonths.forEach(m => {
-        const past = byMonth[m];
-        const pastTotal = Object.values(past).reduce((s,v)=>s+v,0);
-        if (pastTotal === 0) return;
-        const score = Object.keys(BUCKETS).reduce((s,k)=>s+Math.abs((currentTotal>0?(current[k]||0)/currentTotal:0)-(pastTotal>0?(past[k]||0)/pastTotal:0)),0);
-        if (score < bestScore) { bestScore=score; bestMatch={month:m,total:pastTotal}; }
-      });
-      if (!bestMatch || bestScore > 0.45) return null;
-      return { ...bestMatch, similarity: Math.round((1-bestScore/2)*100) };
-    }
+    // generateSpendTwin moved to js/bal/ai-insights/ (batch 7).
 
     // ── SMART BUDGET SUGGESTION ───────────────────────────────────
-    function generateBudgetSuggestion() {
-      if (!getAIConfig().budgetSuggest) return '';
-      const txns = D.transactions || [];
-      if (txns.length < 8) return '';
-      if (!Object.values(D.limits||{}).every(v=>!v||v===0)) return '';
-      const months = [-1,-2,-3].map(o=>offsetMonthStr(o));
-      const avgs = {};
-      Object.keys(BUCKETS).forEach(k => {
-        const totals = months.map(m=>txns.filter(t=>t.month===m&&t.bucket===k).reduce((s,t)=>s+t.amount,0)).filter(v=>v>0);
-        avgs[k] = totals.length ? Math.round(totals.reduce((s,v)=>s+v,0)/totals.length/100)*100 : 0;
-      });
-      if (Object.values(avgs).every(v=>v===0)) return '';
-      window._aiSuggestedLimits = avgs;
-      return '<div class="budget-suggest-card">'
-        + '<div style="font-size:12px;font-weight:700;color:#15803d;margin-bottom:10px">Based on your last 3 months — suggested limits:</div>'
-        + Object.entries(BUCKETS).map(([k,c])=>avgs[k]>0?`<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:${c.c}">${c.g} ${c.l}</span><span style="font-weight:700">${fmtF(avgs[k])}</span></div>`:'').join('')
-        + '<button onclick="APP.applyBudgetSuggestion()" style="width:100%;margin-top:12px;padding:10px;background:#16a34a;color:#fff;border:none;border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--ff)">Apply these limits</button>'
-        + '</div>';
-    }
+    // generateBudgetSuggestion moved to js/bal/ai-insights/ (batch 7).
 
     // ── WEEKLY DIGEST 📅 ──────────────────────────────────────────
-    function getWeeklyDigest() {
-      if (!getAIConfig().weeklyDigest) return null;
-      const now = new Date();
-      if (now.getDay() !== 1) return null;
-      const weekKey = now.getFullYear() + '-W' + Math.ceil(now.getDate()/7);
-      try { const saved=JSON.parse(localStorage.getItem('sn_weekly_digest')||'{}'); if(saved.week===weekKey) return saved.text; } catch(e) { console.warn("[catch]", e); }
-      const lastWeekStart = new Date(now-WEEK_MS).toISOString().slice(0,10);
-      const lastWeekEnd = new Date(now-MS_PER_DAY).toISOString().slice(0,10);
-      const txns = (D?.transactions||[]).filter(t=>t.date>=lastWeekStart&&t.date<=lastWeekEnd);
-      if (txns.length===0) return null;
-      const total = txns.reduce((s,t)=>s+t.amount,0);
-      const topBktKey = Object.keys(BUCKETS).reduce((best,k)=>{
-        const a=txns.filter(t=>t.bucket===k).reduce((s,t)=>s+t.amount,0);
-        return a>(txns.filter(t=>t.bucket===best).reduce((s,t)=>s+t.amount,0))?k:best;
-      },Object.keys(BUCKETS)[0]);
-      const days=[...new Set(txns.map(t=>t.date))];
-      const hvy=days.reduce((b,d)=>{const a=txns.filter(t=>t.date===d).reduce((s,t)=>s+t.amount,0);return a>(b.amt||0)?{d,amt:a}:b;},{});
-      const heavyDay = hvy.d ? new Date(hvy.d+'T12:00:00').toLocaleDateString('en-IN',{weekday:'long'}) : '';
-      const text = 'Last week: '+fmtF(total)+' \u00b7 '+txns.length+' spends \u00b7 Heaviest: '+heavyDay+' \u00b7 Top: '+(BUCKETS[topBktKey]?.l||'Mixed');
-      try { localStorage.setItem('sn_weekly_digest',JSON.stringify({week:weekKey,text})); } catch(e) { console.warn("[catch]", e); }
-      return text;
-    }
+    // getWeeklyDigest moved to js/bal/ai-insights/ (batch 7).
 
     // ── WHY DID I BUY THIS — observation generator ───────────────
     function _generateWhyObservation(t) {
@@ -5107,7 +4062,7 @@
         if (!getAIConfig().monthEndWarn) { card.style.display = 'none'; return; }
         try {
           // Check if dismissed this month
-          const curMon = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+          const curMon = offsetMonthStr(0);
           const warned = _safeGet('sn_monthend_warned', {}); // CR-03
           if (warned.dismissed && warned.month === curMon) { card.style.display = 'none'; return; }
           const warnings = _getMonthEndWarnings();
@@ -5228,284 +4183,36 @@
     }
 
     // ── OCR TEXT PARSER ─────────────────────────────────────────────
-    function aiParseOCR(text) {
-      // OCR-FIX-001: Robust receipt parser — handles ₹ symbol before/after amounts,
-      // Grand Total patterns, Indian receipt formats, UPI payment detection.
-      if (!text) return null;
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-      const fullText = text;
-
-      // ── AMOUNT: multi-strategy extraction ───────────────────────
-      let amt = null;
-      const amtCandidates = [];
-
-      // Strategy 1: "Grand Total" / "Total" line — capture number on same line or next line
-      // Handles: "Grand Total ₹40.00", "Grand Total  40.00", "Total: 40.00"
-      const grandTotalRe = /grand\s*total[^\d₹]*(₹?\s*[0-9,]+(?:\.[0-9]{1,2})?)/gi;
-      const totalRe = /(?:^|\n)[^\n]*?(?:net\s*total|sub\s*total|bill\s*total|total\s*amount|amount\s*payable|payable|total\s*due|total)[^\d₹]*(₹?\s*[0-9,]+(?:\.[0-9]{1,2})?)/gi;
-      let m;
-      while ((m = grandTotalRe.exec(fullText)) !== null) {
-        const v = parseFloat(m[1].replace(/[₹,\s]/g, ''));
-        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 10 });
-      }
-      while ((m = totalRe.exec(fullText)) !== null) {
-        const v = parseFloat(m[1].replace(/[₹,\s]/g, ''));
-        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 8 });
-      }
-
-      // Strategy 2: ₹ symbol directly followed by amount  e.g. "₹40.00" or "₹ 40.00"
-      const rupeeRe = /₹\s*([0-9,]+(?:\.[0-9]{1,2})?)/g;
-      while ((m = rupeeRe.exec(fullText)) !== null) {
-        const v = parseFloat(m[1].replace(/,/g, ''));
-        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 7 });
-      }
-
-      // Strategy 3: "Rs." / "INR" followed by amount
-      const rsRe = /(?:rs\.?|inr)\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi;
-      while ((m = rsRe.exec(fullText)) !== null) {
-        const v = parseFloat(m[1].replace(/,/g, ''));
-        if (v > 0 && v < MAX_AMT) amtCandidates.push({ v, priority: 6 });
-      }
-
-      // Strategy 4: Per-line scan — last standalone number on lines containing "total"
-      for (const line of lines) {
-        if (/total|amount|payable/i.test(line)) {
-          const nums = line.match(/[0-9,]+(?:\.[0-9]{1,2})?/g);
-          if (nums) {
-            const last = parseFloat(nums[nums.length - 1].replace(/,/g, ''));
-            if (last > 0 && last < MAX_AMT) amtCandidates.push({ v: last, priority: 5 });
-          }
-        }
-      }
-
-      // Strategy 5: fallback — largest sensible number in the text
-      if (amtCandidates.length === 0) {
-        const anyRe = /([0-9,]{2,}(?:\.[0-9]{1,2})?)/g;
-        while ((m = anyRe.exec(fullText)) !== null) {
-          const v = parseFloat(m[1].replace(/,/g, ''));
-          if (v >= 5 && v < MAX_AMT) amtCandidates.push({ v, priority: 1 });
-        }
-      }
-
-      if (amtCandidates.length === 0) return null;
-      // Pick highest priority, then largest value among tied priorities
-      amtCandidates.sort((a, b) => b.priority - a.priority || b.v - a.v);
-      amt = Math.round(amtCandidates[0].v * 100) / 100;
-      if (!amt || amt <= 0) return null;
-
-      // ── DATE: extract and normalise to "DD Mon" format ──────────
-      let parsedDate = null;
-      // Formats: 24/03/26, 24-03-2026, 2026-03-24, 24 Mar 2026, 24/03/2026
-      const dateRe = /\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/;
-      const dateMatch = fullText.match(dateRe);
-      if (dateMatch) {
-        const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        let d = parseInt(dateMatch[1]), mo = parseInt(dateMatch[2]);
-        // year in yy format: 26 → 2026
-        const yr = parseInt(dateMatch[3]);
-        const fullYr = yr < 100 ? 2000 + yr : yr;
-        if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
-          parsedDate = `${String(d).padStart(2,'0')} ${MONTHS[mo-1]}`;
-        }
-      }
-
-      // ── MERCHANT: first meaningful line (not header noise) ───────
-      let desc = '';
-      // Skip lines that are clearly not merchant names
-      const skipRe = /^(gst|gstin|fssai|invoice|receipt|tax|date:|time:|cashier|token|bill no|item|qty|price|amount|sub.?total|total|cash|change|paid|round|thank|www\.|http|@|\d{6,}|[\d\/\-]{6,})/i;
-      const numberOnlyRe = /^[0-9₹%+\-\.\s,]+$/;
-      for (const line of lines) {
-        if (line.length >= 3 && line.length <= 60
-            && !skipRe.test(line)
-            && !numberOnlyRe.test(line)
-            && !/^[A-Z0-9]{10,}$/.test(line)) { // skip GST numbers etc.
-          desc = line;
-          break;
-        }
-      }
-      if (!desc) desc = 'Receipt';
-      // Capitalise first letter
-      desc = desc.charAt(0).toUpperCase() + desc.slice(1);
-
-      // ── SOURCE: detect payment method from text ──────────────────
-      let src = (S && S.addSrc) ? S.addSrc : null;
-      if (!src) {
-        const lct = fullText.toLowerCase();
-        if (/paid\s*via\s*(other\s*\[?upi\]?|upi)|upi|gpay|phonepe|paytm|bhim|neft|imps/i.test(fullText)) src = 'upi';
-        else if (/cash/i.test(fullText)) src = 'cash';
-        else if (/card|visa|master|rupay|debit|credit/i.test(fullText)) src = 'others_upi';
-        else src = 'upi'; // most Indian receipts default to UPI
-      }
-
-      // ── BUCKET: keyword-based detection ─────────────────────────
-      const combined = (desc + ' ' + fullText).toLowerCase();
-      let bkt = null;
-      for (const [merchant, b] of Object.entries(AI_MERCHANT_MAP)) {
-        if (combined.includes(merchant)) { bkt = b; break; }
-      }
-      if (!bkt) {
-        const scores = { necessary: 0, committed: 0, comfortable: 0, luxury: 0 };
-        for (const [b, kws] of Object.entries(AI_BKT_KEYWORDS)) {
-          for (const kw of kws) { if (combined.includes(kw)) scores[b] += 1; }
-        }
-        const best = Object.entries(scores).sort((a, b2) => b2[1] - a[1])[0];
-        if (best[1] > 0) bkt = best[0];
-      }
-      if (!bkt) bkt = 'comfortable'; // food/cafe receipts are mostly comfortable
-
-      return { amt, desc, bkt, src, date: parsedDate };
-    }
+    // aiParseOCR moved to js/bal/ai-insights/ (batch 7).
 
     // ── v5.0 AI FEATURES ─────────────────────────────────────────────
 
     // Feature 1: 3am Warning
-    function getLateNightWarning() {
-      const hour = new Date().getHours();
-      if (hour < 6 || hour > 10) return null;
-      const yesterday = new Date(Date.now()-MS_PER_DAY).toISOString().slice(0,10);
-      const lateNight = (D.transactions||[]).filter(t => {
-        if (!t.date || t.date !== yesterday) return false;
-        const h = t.time ? parseInt(t.time.split(':')[0]) : 12;
-        return h >= 22 || h <= 4;
-      });
-      if (lateNight.length === 0) return null;
-      const total = lateNight.reduce((s,t) => s+t.amount,0);
-      const merchants = [...new Set(lateNight.map(t=>t.merchant))].slice(0,2).join(', ');
-      return `🌙 Last night: ${fmtF(total)} spent after 10pm — ${merchants}`;
-    }
+    // getLateNightWarning moved to js/bal/ai-insights/ (batch 7).
 
     // Feature 2: Category Creep Detector
-    function detectCategoryCreep() {
-      const txns = D.transactions || [];
-      const results = [];
-      Object.keys(BUCKETS).forEach(k => {
-        const months = [-3,-2,-1,0].map(o => ({
-          month: offsetMonthStr(o),
-          total: txns.filter(t=>t.month===offsetMonthStr(o)&&t.bucket===k)
-                     .reduce((s,t)=>s+t.amount,0)
-        }));
-        const totals = months.map(m=>m.total).filter(v=>v>0);
-        if (totals.length < 3) return;
-        const growing = totals.every((v,i) => i===0 || v >= totals[i-1] * 1.08);
-        if (growing) {
-          const pct = Math.round(((totals[totals.length-1]/totals[0])-1)*100);
-          results.push({k, pct, latest: totals[totals.length-1]});
-        }
-      });
-      return results;
-    }
+    // detectCategoryCreep moved to js/bal/ai-insights/ (batch 7).
 
     // Feature 3: Salary Day Intelligence
-    function getSalaryDayIntelligence() {
-      const src = SRC_DB.load();
-      const salaryEntries = (src.sources||[]).filter(s =>
-        (s.name||'').toLowerCase().includes('salary') ||
-        (s.name||'').toLowerCase().includes('income')
-      );
-      if (salaryEntries.length === 0) return null;
-      const days = salaryEntries.map(s => new Date(s.timestamp||s.date).getDate());
-      const salaryDay = days.sort((a,b) =>
-        days.filter(d=>d===b).length - days.filter(d=>d===a).length
-      )[0];
-      if (!salaryDay) return null;
-      const today = new Date().getDate();
-      const daysUntil = salaryDay > today ? salaryDay - today :
-        (new Date(new Date().getFullYear(), new Date().getMonth()+1, salaryDay).getDate()
-         + (30 - today));
-      if (daysUntil > 3 || daysUntil <= 0) return null;
-      const currentSpend = (D.transactions||[])
-        .filter(t => t.month === offsetMonthStr(0))
-        .reduce((s,t) => s+t.amount,0);
-      const lastSalary = salaryEntries
-        .filter(s => s.month === offsetMonthStr(-1))
-        .reduce((s,e) => s+(e.amount||0), 0) ||
-        salaryEntries.reduce((s,e) => s+(e.amount||0), 0) / salaryEntries.length;
-      const remaining = lastSalary - currentSpend;
-      const dayWord = daysUntil === 1 ? 'tomorrow' : `in ${daysUntil} days`;
-      return `💰 Salary expected ${dayWord}. You have ${fmtF(Math.max(0,remaining))} left this month.`;
-    }
+    // getSalaryDayIntelligence moved to js/bal/ai-insights/ (batch 7).
 
     // Feature 4: Honest Comparison
-    function generateHonestComparison(monthStr) {
-      const txns = D.transactions || [];
-      const current = txns.filter(t=>t.month===monthStr).reduce((s,t)=>s+t.amount,0);
-      const pastMonths = [...new Set(txns.map(t=>t.month))].filter(m => m !== monthStr);
-      if (pastMonths.length < 2) return null;
-      const avg = pastMonths.reduce((s,m) => {
-        return s + txns.filter(t=>t.month===m).reduce((sum,t)=>sum+t.amount,0);
-      }, 0) / pastMonths.length;
-      if (avg === 0) return null;
-      const diff = current - avg;
-      const pct = Math.round(Math.abs(diff/avg)*100);
-      if (pct < 5) return `This month's total is almost identical to your personal average of ${fmtF(Math.round(avg))}.`;
-      return diff > 0
-        ? `Compared to your own average, this month you spent ${pct}% more than usual — ${fmtF(Math.abs(diff))} above your typical ${fmtF(Math.round(avg))}.`
-        : `Compared to your own average, this month you spent ${pct}% less than usual — ${fmtF(Math.abs(diff))} below your typical ${fmtF(Math.round(avg))}. Strong month.`;
-    }
+    // generateHonestComparison moved to js/bal/ai-insights/ (batch 7).
 
     // ── Week key helper ─────────────────────────────────────────────
-    function _aiWeekKey() {
-      return 'w' + Math.floor(Date.now() / (WEEK_MS));
-    }
+    // _aiWeekKey moved to js/bal/ai-insights/ (batch 7).
 
     // ── FEATURE 1: PAYDAY MODE ────────────────────────────────────────
     // Detects approximate payday from history, shows balance left this month
-    function _getPaydayInfo() {
-      const txns = D.transactions || [];
-      if (txns.length < 5) return null;
-      // Infer payday: find the day-of-month that appears most as a high-spend spike start
-      // Simpler heuristic: look at income sources for this month
-      const sd = SRC_DB.load();
-      const curMon = offsetMonthStr(0);
-      const curSrc = (sd.sources || []).filter(s => s.month === curMon);
-      const totalIncome = curSrc.reduce((s, x) => s + (Number(x.amount) || 0), 0);
-      if (totalIncome <= 0) return null;
-      const sm = summary(curMon); // BUG-1: scope to current month
-      const spent = sm.total || 0;
-      const left = totalIncome - spent;
-      const pct = Math.round((spent / totalIncome) * 100);
-      const now = new Date();
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const daysLeft = daysInMonth - now.getDate();
-      const dailyBudget = left > 0 && daysLeft > 0 ? Math.round(left / daysLeft) : 0;
-      return { totalIncome, spent, left, pct, daysLeft, dailyBudget };
-    }
+    // _getPaydayInfo moved to js/bal/ai-insights/ (batch 7).
 
     // ── FEATURE 2: GUILT-FREE DAY STREAK ─────────────────────────────
     // Counts consecutive days with zero spends
-    function _getGuiltFreeStreak() {
-      const txns = D.transactions || [];
-      if (txns.length === 0) return 0;
-      const now = new Date();
-      let streak = 0;
-      // Walk back from yesterday
-      for (let i = 1; i <= 30; i++) {
-        const d = new Date(now); d.setDate(d.getDate() - i);
-        const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-        const hasSpend = txns.some(t => t.date === dateStr);
-        if (hasSpend) break;
-        streak++;
-      }
-      return streak;
-    }
+    // _getGuiltFreeStreak moved to js/bal/ai-insights/ (batch 7).
 
     // ── FEATURE 3: MERCHANT FREQUENCY ALERT ──────────────────────────
     // Called from aiReaction — returns alert string or null
-    function _merchantFreqAlert(desc, transactions) {
-      if (!desc || desc.length < 2) return null;
-      const lower = desc.toLowerCase();
-      const weekAgo = Date.now() - WEEK_MS;
-      const recent = (transactions || []).filter(t =>
-        t.merchant && t.merchant.toLowerCase() === lower &&
-        new Date(t.timestamp).getTime() > weekAgo
-      );
-      const count = recent.length + 1; // +1 = current save
-      if (count >= 3) {
-        const ordinal = count === 3 ? '3rd' : count === 4 ? '4th' : count === 5 ? '5th' : `${count}th`;
-        return `${ico(desc)} ${ordinal} time at ${desc} this week 👀`;
-      }
-      return null;
-    }
+    // _merchantFreqAlert moved to js/bal/common/merchant-matching.js (batch 6).
 
     // ── FEATURE 4: SMART AMOUNT SUGGEST ──────────────────────────────
     // Returns last amount for a matched merchant, or null
@@ -5523,50 +4230,24 @@
 
     // ── FEATURE 5: MONTH-END WARNING ─────────────────────────────────
     // Returns array of buckets near/over limit in last week of month, or []
-    function _getMonthEndWarnings() {
-      const now = new Date();
-      const day = now.getDate();
-      if (day < 22) return []; // only last ~9 days of month
-      const sm = summary(offsetMonthStr(0)); // BUG-1
-      const lim = D.limits || {};
-      const warnings = [];
-      for (const [bk, cfg] of Object.entries(BUCKETS)) {
-        const spent = sm[bk] || 0;
-        const limit = lim[bk] || 0;
-        if (limit <= 0) continue;
-        const pct = spent / limit;
-        if (pct >= BUDGET_WARN_PCT && pct < 1) warnings.push({ bk, cfg, spent, limit, pct, over: false });
-        else if (pct >= 1) warnings.push({ bk, cfg, spent, limit, pct, over: true });
-      }
-      return warnings;
-    }
+    // _getMonthEndWarnings moved to js/bal/ai-insights/ (batch 7).
 
     // ── INSTALL AI METHODS + HOOK r_home / r_add / r_month ──────────
-    // BUG-7: rHist + rHistDebounced — called from HTML oninput but were never defined
-    function rHist() { if (APP && APP.r_history) APP.r_history(); }
-    let _rHistTimer; // LW-02: let not var
-    function rHistDebounced() {
-      clearTimeout(_rHistTimer);
-      _rHistTimer = setTimeout(() => {
-        rHist();
-        // BUG-027: record real free-text searches (merchant/amount) so
-        // showTagSuggest can offer them back on next focus — search had no
-        // memory at all before this, only the separate tag-suggest list.
-        try {
-          const q = (document.getElementById('srchIn')?.value || '').trim();
-          if (q.length >= 2) {
-            let recent = JSON.parse(localStorage.getItem('sn_recent_search') || '[]');
-            recent = [q, ...recent.filter(r => r.toLowerCase() !== q.toLowerCase())].slice(0, 5);
-            localStorage.setItem('sn_recent_search', JSON.stringify(recent));
-          }
-        } catch(e) {}
-      }, 200);
-    }
+    // rHist/rHistDebounced moved to js/ui/common/render.js (batch 8).
 
     _guardAPP(APP);
     _installAIMethods();
-    // Seed tag registry from existing transaction history (runs once)
-    try { migrateTagsToRegistry(); } catch(e) { console.warn("[catch]", e); }
+    // BUGFIX (post-restructure, explicit user request — NOT part of the
+    // v6.19 reorg, which promised zero behavior change): migrateTagsToRegistry()
+    // used to run here, at module-load time, before D is ever populated
+    // (D only gets set inside launch()'s call chain, which fires later).
+    // Confirmed via real-user-data testing that this made the call a
+    // permanent no-op — it always saw D===null, found zero tags, but still
+    // set registry._migrated=true, which blocked every future real attempt
+    // via the function's own idempotency guard. Moved into launch() (see
+    // below) — the one checkpoint every boot path (existing user, new user
+    // onboarding, password unlock, file restore) funnels through only
+    // after D is genuinely populated.
 
     // Hook r_home to also render AI cards
     const _origRHome = APP.r_home.bind(APP);
@@ -5711,60 +4392,3 @@
       this.cm();
       setTimeout(() => this.showTagManager(), 50);
     };
-
-    // BUG-017: global error handlers
-    // BUG-6: Pinch zoom snap-back on iOS
-    (function(){
-      var _lte=0,_pin=false;
-      document.addEventListener('touchstart',function(e){
-        if(e.touches.length>=2)_pin=true;
-      },{passive:true});
-      document.addEventListener('touchend',function(e){
-        var now=Date.now();
-        if(e.touches.length===0&&now-_lte<=300&&!_pin)e.preventDefault();
-        if(e.touches.length===0)_lte=now;
-        if(_pin&&e.touches.length===0){
-          _pin=false;
-          setTimeout(function(){
-            var m=document.querySelector('meta[name=viewport]');
-            if(!m)return;
-            var o=m.getAttribute('content');
-            m.setAttribute('content',o+',maximum-scale=1.0,minimum-scale=1.0');
-            requestAnimationFrame(function(){
-              requestAnimationFrame(function(){m.setAttribute('content',o);});
-            });
-          },120);
-        }
-      },{passive:false});
-    })();
-    window.onerror = (msg, src, line) => { console.error('Global error:', msg, src, line); };
-    window.addEventListener('unhandledrejection', e => {
-      console.error('Unhandled promise:', e.reason);
-      if (e.reason && String(e.reason).toLowerCase().indexOf('storage') === -1) {
-        toast('Something went wrong. Please try again.');
-      }
-      e.preventDefault();
-    });
-
-        // BUG-020: Escape key closes modal
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && document.getElementById('modal').classList.contains('on')) APP.cm();
-    });
-
-        APP.boot();
-
-    // BUG-021: Swipe right to go back on sub-screens
-    (function () {
-      let sx = 0, sy = 0;
-      const BACK_SCREENS = { sort: 'home', slice: 'month', add: 'home', limits: 'home', settings: 'home', normalize: 'settings' };
-      document.addEventListener('touchstart', e => { if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; } }, { passive: true });
-      document.addEventListener('touchend', e => {
-        if (!e.changedTouches.length) return;
-        const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-        if (sx > 30) return; // must start from left edge
-        if (dx > 60 && Math.abs(dy) < 80) {
-          const dest = BACK_SCREENS[S.tab];
-          if (dest) APP.go(dest);
-        }
-      }, { passive: true });
-    })();

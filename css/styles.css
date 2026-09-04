@@ -236,81 +236,151 @@
       }
     }
 
-    /* ── EVERYTHING ELSE: tablet, desktop, AND phone landscape ──
-       v5.6: this used to be `min-width: 768px` only, so a phone turned
-       sideways (landscape, but often <768px wide, e.g. iPhone SE at
-       667px) fell through to the mobile rule above at native width —
-       stretching a design meant for a ~360-420px column across 600-900px.
-       A wider landscape phone (≥768px, e.g. iPhone 14 Pro Max at 926px)
-       hit this rule already, but got squeezed into a sliver once
-       max-height capped it (the letterboxing bug the v5.5 rotate-guard
-       band-aided over instead of fixing — see README). Triggering on
-       `orientation: landscape` as well as `min-width: 768px` means ANY
-       landscape phone now gets the same bounded card as tablet/desktop,
-       and this replaces the rotate-guard entirely — no more "please
-       rotate your device" block screen.
-
-       v5.5 fix (kept): width and max-height are capped TOGETHER
-       (max-width derived from the same 95vh via the card's own aspect
-       ratio) so both dimensions shrink together and the phone shape is
-       preserved at any window size, instead of squashing into a
-       near-square card on a short/wide viewport. */
+    /* ── APP SHELL: fills the real viewport at EVERY size ──
+       v7.0-responsive: previously this tier (768px+ / landscape) locked
+       #app to a fixed phone-shaped card (420-440px × 820-880px) floating
+       on a dark background — a deliberate v5.5-v6.6 design choice for a
+       mobile-only product. Explicit user request: remove the screen-size
+       dependency entirely, matching the mobile rule's fill-the-viewport
+       behavior at all widths. Individual screens now handle their own
+       wide-screen treatment (grid reflow for data screens, a capped
+       centered column for forms/auth) — see .scr-wide-grid and
+       .scr-narrow-form below. */
     @media (min-width: 768px), (orientation: landscape) {
-      body {
-        background: linear-gradient(135deg, #060a0f 0%, #0d1a2e 50%, #060a0f 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      [data-theme="light"] body {
-        /* v6.1: flat, a touch deeper than the card's own #eef1f6 so the
-           card still reads as a distinct surface */
-        background: #e3e8ee;
-      }
-
       #app {
-        position: relative;
-        width: 420px;
-        height: 820px;
-        max-height: 95vh; /* fallback for browsers without dvh support */
-        max-height: 95dvh; /* v6.6: vh is well-documented to misreport right after an
-                               orientation change on mobile Safari/Chrome (it can hold the
-                               PRE-rotation value, or include browser-chrome area that
-                               isn't actually visible) — dvh tracks the real, current
-                               visible viewport. Declared after vh so unsupporting
-                               browsers keep the vh fallback and supporting ones get the
-                               corrected value; same pattern used for max-width below. */
-        max-width: calc(95vh * 420 / 820); /* keep 420:820 aspect ratio when height-constrained */
-        max-width: calc(95dvh * 420 / 820);
-        min-width: 320px; /* v5.6: floor for very short landscape phones (e.g. 375px-tall
-                              viewport → max-width would calc to ~180px, unreadably thin).
-                              Below this the card trades aspect-ratio purity for a usable
-                              width; real phone landscape widths are all ≥560px so this
-                              never causes horizontal overflow on an actual device. */
-        border-radius: 28px;
-        box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(var(--ink-rgb),.08);
-        overflow: hidden;
+        width: 100%;
+        height: 100%;
       }
     }
 
-    @media (min-width: 768px), (orientation: landscape) {
-      [data-theme="light"] #app {
-        /* v6.1: was rgba(0,0,0,.7) — a shadow tuned for a dark card floating
-           on a dark background; far too heavy under a flat light card */
-        box-shadow: 0 20px 60px rgba(15,23,42,.18), 0 0 0 1px rgba(15,23,42,.06);
+    /* ── WIDGET MATRIX — v7.1-responsive ──
+       One reusable pattern, applied to every "list of same-shaped
+       widgets" screen: 1 column narrow (<768px, unchanged from mobile),
+       2 columns tablet (768-1199px), 3 columns wide (1200px+). Forms
+       stay a capped centered column at every width — a single field
+       doesn't benefit from more columns. */
+    .widget-matrix {
+      display: block; /* mobile/narrow: unchanged single column */
+    }
+    @media (min-width: 768px) {
+      .widget-matrix {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+        align-items: start;
+      }
+    }
+    @media (min-width: 1200px) {
+      .widget-matrix {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    @media (min-width: 768px) {
+      /* Forms/auth: capped centered column, not part of the matrix —
+         a password field or settings toggle list doesn't want 3 columns. */
+      #pgTrust .trust-scroll,
+      .lk-card,
+      .fg-card,
+      #pgOb .ob-scroll,
+      #sAdd {
+        max-width: 480px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      #sSettings,
+      #sLimits,
+      #sNormalize,
+      #mmBody {
+        max-width: 680px;
+        margin: 0 auto;
+        width: 100%;
+      }
+
+      /* Home: carousel -> matrix grid. buildCarousel() still runs (moves
+         the AI/bucket cards into #homeCarousel1, still needed for mobile),
+         but at this width we override its flex/scroll layout with the
+         same .widget-matrix grid instead — cards become static grid
+         items, not swipeable slides. Dots (slide position indicator)
+         and the auto-advance timer only make sense for the one-at-a-time
+         mobile view, so both are hidden/paused here too. */
+      #homeCarousel1 {
+        display: grid !important; /* buildCarousel() sets an inline
+          style="display:flex" on every render (for mobile's swipe
+          layout) — only !important in the stylesheet can override an
+          inline style, regardless of selector specificity. */
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+        overflow: visible;
+        scroll-snap-type: none;
+        max-width: none;
+        padding: 4px 0 2px;
+        margin: 0;
+      }
+      .home-frame #homeCarousel1 {
+        flex: none;
+        height: auto;
+      }
+      .home-frame .card-carousel > *,
+      #homeCarousel1 > * {
+        flex: none;
+        max-width: none;
+        width: auto;
+      }
+      #homeCarousel1Dots {
+        display: none;
+      }
+      .home-frame {
+        height: auto !important; /* v6.11's 30vh/260px cap was sized for a
+          one-slide mobile hero frame; a multi-row grid needs to grow with
+          its content instead of being clipped. !important needed: the
+          base .home-frame rule sits later in the file (same specificity,
+          later source position wins in a tie) and would otherwise
+          override this media-scoped one regardless of nesting. */
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+
+      /* Insights: grid the overview-card wrapper only (js/app.js wraps
+         the homogeneous cards — chart, category-creep alerts, spend
+         twin — in .ins-overview-grid). The section label, per-month
+         blocks, and footer note below it are NOT part of this wrapper,
+         so they stay single-column exactly as before — this is what the
+         earlier blanket-grid attempt got wrong. */
+      #insightsBody .ins-overview-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+        align-items: start;
+      }
+
+      /* History: month groups. Needed one small JS hook —
+         renderMonthGroup()'s wrapper div had no class at all (same shape
+         as the sort-bar row above it), so a container-level grid would
+         have wrongly grid-ified the sort buttons too. Added
+         class="mgrp" there (see js/app.js) — pure CSS hook, zero
+         behavior change to the function itself. */
+      #histList {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0 16px;
+        align-items: start;
+      }
+      #histList > div:not(.mgrp) {
+        grid-column: 1 / -1; /* sort-bar row spans full width, stays out of the grid flow */
       }
     }
 
     @media (min-width: 1200px) {
-      #app {
-        width: 440px;
-        height: 880px;
-        max-height: 95vh; /* v5.5 fix: this breakpoint had no height cap at all —
-                              on a short-but-wide window the card was forced to
-                              880px tall regardless of what actually fit on screen */
-        max-height: 95dvh; /* v6.6: see the 768px tier above for why dvh over vh */
-        max-width: calc(95vh * 440 / 880); /* keep 440:880 aspect ratio when height-constrained */
-        max-width: calc(95dvh * 440 / 880);
+      #homeCarousel1 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      #insightsBody .ins-overview-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      #histList {
+        grid-template-columns: repeat(3, 1fr);
       }
     }
 
@@ -3608,6 +3678,23 @@
       justify-content: center;
       padding: 60px 24px;
       text-align: center;
+    }
+
+    /* v7.1-responsive: .empty-state (Month, History) had ZERO layout CSS
+       at all — every rule on its children was inline, so on a wide
+       screen the whole block sat left-aligned with no centering, no
+       width cap, looking broken (a tiny icon+text huddled in the
+       top-left of an otherwise-empty 1440px page). Same fix pattern as
+       .ins-empty above, which already had this. */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 24px;
+      text-align: center;
+      max-width: 420px;
+      margin: 0 auto;
     }
 
     .ins-card {

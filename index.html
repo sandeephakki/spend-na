@@ -14,11 +14,28 @@
   APP:            Spend-na
   VERSION:        v6.19
   FILE:           index.html — companion files now organized into css/styles.css,
-                  js/app.js, js/env-config.js; sw.js, manifest.json, icon-192.png,
-                  icon-512.png, .nojekyll stay at repo root (sw.js MUST stay at root —
-                  its registration scope can only be as broad as its own directory,
-                  moving it into js/ would silently limit the service worker to
-                  js/* and break offline support for the rest of the app)
+                  js/app.js, js/env-config.js,
+                  js/core/{state,app-init}.js,
+                  js/dal/common/{storage,auth}.js,
+                  js/utils/utils.js,
+                  js/bal/common/{formatters,merchant-matching,duplicate-detection}.js,
+                  js/bal/ai-insights/{forecast,insight-generation,budget-suggestions,
+                  digest-and-alerts,parsing}.js,
+                  js/ui/common/{render,swipe-actions}.js; sw.js,
+                  manifest.json, .nojekyll stay at repo root (sw.js MUST stay
+                  at root — its registration scope can only be as broad as
+                  its own directory, moving it into js/ would silently limit
+                  the service worker to js/* and break offline support for
+                  the rest of the app); img/{icon,icon-192,icon-512}.png —
+                  moved off repo root into img/ (explicit user request,
+                  outside the v6.19 restructure's original scope, which had
+                  left this "unchanged" for a later pass); manifest.json's
+                  icon "src" paths updated to img/icon-192.png /
+                  img/icon-512.png to match — confirmed no other file
+                  references these by path (index.html's favicon/
+                  apple-touch-icon <link> tags use inline base64 data URIs,
+                  not file paths, so they're unaffected; sw.js doesn't
+                  reference icon paths either, it only precaches './')
   HOST:           GitHub Pages — git push = deployed
   SCHEMA_VERSION: 2
   SW_CACHE:       sn-v27
@@ -238,6 +255,343 @@
 
 10. GOTCHAS
     Every bug fixed adds one line. This list only grows. Never remove.
+
+  tag-registry   BUGFIX (post-restructure, explicit user request, NOT part
+                 of the v6.19 reorg's zero-behavior-change promise):
+                 migrateTagsToRegistry() used to run at app.js module-load
+                 time, before D was ever populated (D only gets set inside
+                 launch()'s call chain) — confirmed via real-user-data
+                 testing (387 real transactions) that this made the call a
+                 permanent no-op on every single page load: it always saw
+                 D===null, found zero tags, but still set
+                 registry._migrated=true, permanently blocking any future
+                 real attempt via the function's own idempotency guard.
+                 Same bug confirmed present in the pristine pre-restructure
+                 original (line ~5569 vs ~5754) — not introduced by any
+                 batch. Fixed two ways: (1) moved the call from module-load
+                 time into APP.launch() — the one checkpoint every boot
+                 path (existing user, new user onboarding, password
+                 unlock, file restore) funnels through only after D is
+                 genuinely populated; (2) the guard itself
+                 (js/dal/common/storage.js) now checks
+                 `_migrated && tags.length > 0` instead of just
+                 `_migrated`, so devices that already have the poisoned
+                 registry saved (real risk — this bug has likely been live
+                 for existing users) self-heal on their next launch rather
+                 than staying stuck forever. Verified against real data:
+                 fresh-install seeds 37 real tags correctly; a simulated
+                 poisoned registry self-heals to the same 37; repeat calls
+                 are idempotent (no duplication); a genuinely tag-free
+                 user's registry stays stable at 0 with no infinite
+                 re-scan risk.
+  restructure    v6.19-restructure: DAL batch 1 (per spend-na-restructure.md)
+                 moved isStorageAvailable/migrateData/SCHEMA_VERSION/
+                 _loadTagRegistry/_saveTagRegistry/pruneOldTags to
+                 js/dal/common/storage.js, and md5/hashPw to
+                 js/dal/common/auth.js — plain classic scripts (NOT ES
+                 modules yet), loaded before app.js, same global scope.
+                 Batch 2 moved D/S (central state) to js/core/state.js,
+                 same approach. Batch 3 moved LS/DB/SRC_DB/SHARD/
+                 debouncedSave/_commitSave/migrateTagsToRegistry to
+                 storage.js — these needed D (state.js), so were
+                 deferred until batch 2 landed. Batch 3's first attempt
+                 wrongly deleted the AI_CONFIG_DEFAULT/FLAG_DEFAULTS/
+                 FLAGS block along with LS→SHARD (line-range deletion
+                 was too broad); caught by cross-checking every
+                 original top-level declaration name against the new
+                 file set, and fixed before this report — FLAGS stays
+                 in app.js, not DAL. Batch 4 moved _txnUpdate/_txnDelete
+                 to storage.js (pure D mutation, no DOM — simpler than
+                 doc's "mixed concern" prediction, no split needed).
+                 Batch 5: js/bal/common/formatters.js (fmt/fmtF/fmtINR/
+                 parseINR/_fmtDate/_fmtMonth/_fmtTime/offsetMonthStr/
+                 offsetMonthLong). Batch 6: js/bal/common/
+                 merchant-matching.js + duplicate-detection.js —
+                 deviated from doc's file split by keeping
+                 _computeNormalizeConflicts with merchant-matching
+                 (tightly coupled to _levenshtein/_normMerchantKey
+                 right next to it). Batch 7: full js/bal/ai-insights/
+                 (forecast/insight-generation/budget-suggestions/
+                 digest-and-alerts/parsing.js, 20 functions) — doc
+                 hypothesized "getMonthEndWarnings", real name is
+                 "_getMonthEndWarnings", used the real name. Batch 8:
+                 js/ui/common/render.js (fmtHero/avHTML/ico/modal +
+                 safeModal/userModal bundled in as trivial modal()
+                 wrappers, + rHist/rHistDebounced) and swipe-actions.js
+                 — initSwipeActions was an anonymous IIFE inlined at
+                 its one call site inside r_history(); converted to a
+                 named top-level function with an explicit call site,
+                 same runtime behavior. Every batch verified with
+                 node --check plus a mechanical cross-check (every
+                 top-level name in the pristine original app.js
+                 accounted for exactly once across the new file set —
+                 catches both missing and duplicated declarations).
+                 MODULE MAP line numbers below are now stale for
+                 everything after this point in app.js until the full
+                 restructure completes and line numbers are
+                 re-verified. Batch 9 moved the boot-sequence tail
+                 (pinch-zoom guard, window.onerror/unhandledrejection,
+                 Escape-closes-modal, APP.boot() call, swipe-back-nav)
+                 to js/core/app-init.js — UNLIKE every other extracted
+                 file, this one loads AFTER app.js (needs APP to exist
+                 at top-level script time). CAVEAT: the Node-based
+                 smoke test hit a real limitation here — require()
+                 isolates each file's scope in Node, so it can't
+                 validate that APP is visible to app-init.js the way
+                 real classic <script> tags share one global lexical
+                 scope in an actual browser. The smoke test only ever
+                 validated each file's own top-level execution, not
+                 true cross-file resolution — the static name
+                 cross-check (which passed clean, every batch) is what
+                 actually validates that. Real browser testing is
+                 still required, as flagged since batch 1. Batch 10
+                 moved esc/DEBUG/log/_safeGet/_guardAPP to
+                 js/utils/utils.js — cross-cutting, used by all layers,
+                 per doc's utils/ guidance. Loads first among extracted
+                 files (before core/state.js) since it has zero
+                 dependencies beyond window.ENV, already set by
+                 env-config.js. Batch 11 converted app.js + app-init.js
+                 to type="module" — REVERTED. Confirmed broken by a real
+                 user, in production, with real data: importing a data
+                 file threw a cascade of ReferenceErrors — "BUCKETS is
+                 not defined", "MS_PER_DAY is not defined", "PRESET_TAGS
+                 is not defined", "getAIConfig is not defined" — from
+                 inside merchant-matching.js, digest-and-alerts.js,
+                 storage.js, insight-generation.js (all classic scripts,
+                 batches 1-10). History page rendered blank (histCnt
+                 showed "387 transactions" but histList stayed empty —
+                 _guardAPP's try/catch silently swallowed the crash
+                 mid-render). ROOT CAUSE: batch 11's own verification
+                 only checked whether a module can READ classic-script
+                 globals (yes — confirmed true, both by reasoning and by
+                 a real browser) — it never checked the REVERSE: whether
+                 classic scripts can read globals declared inside a
+                 module. They categorically cannot, by spec — a
+                 module's top-level bindings are private to that module,
+                 always, regardless of load order. BUCKETS, MS_PER_DAY,
+                 PRESET_TAGS, WEEK_MS, MAX_AMT, BUDGET_WARN_PCT,
+                 AI_CONFIG_DEFAULT, FLAG_DEFAULTS, FLAGS, getAIConfig —
+                 all still declared inside app.js, never moved by any
+                 batch — became invisible to every extracted classic-
+                 script file the moment app.js became a module, no
+                 matter that those files loaded first. The batch 11
+                 verification's own Node-based testing (vm.runInThisContext
+                 across all files uniformly) had a blind spot that
+                 matched this exact failure: vm.runInThisContext doesn't
+                 enforce real module-scope isolation, so it silently
+                 validated the wrong thing — every file appeared to
+                 share scope in testing, which is only true for classic
+                 scripts, not for a module among classic scripts. FIX:
+                 reverted app.js + app-init.js to plain classic scripts
+                 (matching every other extracted file) — restores the
+                 one shared global scope batches 1-10 were actually
+                 built and correctly tested against. Removed the
+                 window.APP/window.toast/window._fmtAmtLive exposure
+                 block batch 11 added — no longer needed, those are
+                 ordinary globals again. Re-verified in an actual
+                 headless Chrome browser (not Node) against the same
+                 real user data that surfaced the bug: History renders
+                 2.4MB of real content (was 0 bytes), zero
+                 ReferenceErrors across Home/Insights/Month/Sources/
+                 History after a real file-picker import. The ES-module
+                 conversion, as a goal, is NOT done — the codebase is
+                 back to 100% classic scripts, which is the last
+                 verified-working state.
+
+  responsive    v7.0-responsive: explicit user request — removed the
+                fixed-phone-card layout (v5.5-v6.6 design: #app locked to
+                420-440px x 820-880px, floating on a dark background at
+                768px+). #app now fills the real viewport at every size.
+                Per-screen treatment instead of one global rule: forms/
+                auth (trust, lock via .lk-card, forgot-password via
+                .fg-card, onboarding, add-spend, settings, limits,
+                normalize) capped at max-width:480px centered — going
+                edge-to-edge would stretch a password field across a
+                2560px monitor. Data screens go edge-to-edge: History's
+                month groups reflow into a real CSS grid (needed one
+                small JS hook — class="mgrp" added to renderMonthGroup's
+                wrapper div, zero logic change, since it shared an
+                unclassed <div> shape with the sort-bar row above it).
+                Two items deliberately NOT done this pass, reverted
+                rather than shipped broken: (1) Insights — insightsBody
+                mixes .ins-card/.creep-card overview cards, a bare
+                section-label div, per-month blocks, and a footer note,
+                all concatenated as raw strings with no wrapper around
+                just the cards; a blanket grid rule visibly broke the
+                layout in real-browser testing (confirmed via headless
+                Chrome + real user data, not guessed) — needs the same
+                kind of JS wrapper as History's .mgrp fix, scoped
+                correctly, before it can grid. (2) Home — the AI/bucket
+                cards aren't a static stack; buildCarousel() physically
+                moves them into ONE swipeable one-at-a-time carousel
+                mixed with the AI insight/forecast/payday cards. Left
+                the carousel mechanism itself untouched (real JS
+                decision needed: skip carousel-building on wide screens?
+                show both a carousel and a grid?) — only capped its
+                width to max-width:480px so the pre-existing
+                .home-frame .card-carousel > * rule (a "hero frame" look,
+                flex:0 0 100%, unrelated to this pass) stops stretching
+                one AI card edge-to-edge across the full viewport, which
+                looked broken once nothing else constrained the
+                surrounding card. .home-frame's own height:30vh is
+                unrelated pre-existing sizing (same relative proportions
+                on mobile) — not a regression, left alone. Verified: real
+                headless Chrome (not just Node), 3 viewports (390/768/
+                1440px), all 5 tabs, real user data via actual file-picker
+                import — 0 errors beyond the pre-existing unrelated
+                Cloudflare-beacon/service-worker CSP issues (flagged
+                separately, not yet fixed).
+
+                Follow-up round, same pass (explicit user feedback after
+                first review): (1) Settings/Limits/Normalize were also
+                capped at 480px like a password screen — they hold lists
+                of toggles/options, not a single field, so widened to
+                680px. (2) Install banner (#iBanner, bottom bar) showed
+                on every fresh session with no memory of a prior
+                dismissal — added localStorage persistence
+                (sn_install_dismissed) so closing it stays closed. Note:
+                the small native browser icon some users see near the
+                address bar is Chrome's own PWA-install affordance for
+                any page with a valid manifest.json — that's standard
+                browser behavior, not app-controlled, not the same thing
+                as the in-app banner. (3) Home carousel now auto-advances
+                continuously (every 4s, smooth scroll, wraps to start) —
+                explicit request. Pauses 8s after any manual touch/
+                pointer interaction so it never fights a real swipe;
+                skipped entirely under prefers-reduced-motion; clears its
+                own prior interval on every buildCarousel() re-run so
+                timers can't pile up across renders (buildCarousel() runs
+                on every r_home()). (4) Confirmed, not built: resizing an
+                open browser window narrower already correctly collapses
+                to the mobile layout live, no reload needed — same
+                viewport-width media queries driving both directions,
+                verified by live-resizing an active session in headless
+                Chrome (1440px -> 375px mid-session) rather than only
+                testing fresh loads at each size.
+
+                Matrix-grid round (explicit user request: "widgets in
+                matrix format, 3xN big screen / 1xN narrow"): replaced
+                the ad-hoc per-screen grid rules with one reusable
+                .widget-matrix pattern — 1 column <768px (unchanged
+                mobile), 2 columns 768-1199px, 3 columns 1200px+. Applied
+                to History (as before) and, this round, actually fixed
+                the two previously-deferred items instead of leaving them
+                open: (1) Insights — added a real wrapper this time
+                (<div class="ins-overview-grid"> around just
+                overviewHtml's homogeneous cards in js/app.js, closed
+                right after Spend Twin, before the month-wise sections
+                begin) so the grid targets only the actual cards, not the
+                section label/per-month blocks/footer that broke the
+                first attempt. (2) Home — buildCarousel()'s cards now
+                lay out in the same matrix grid on 768px+ instead of
+                staying a one-at-a-time swipe carousel; the carousel
+                mechanism (dots, auto-advance) is hidden/skipped at that
+                width, not removed — mobile keeps the full swipe+
+                auto-advance experience unchanged.
+
+                Two real CSS cascade bugs found and fixed via real-browser
+                computed-style inspection (not guessed): (a)
+                buildCarousel() sets an INLINE style="display:flex" on
+                #homeCarousel1 every render (for mobile's layout) — inline
+                styles beat any external stylesheet rule regardless of
+                selector specificity, so the grid rule needed
+                `!important` to win at all; confirmed via
+                getComputedStyle before/after (was "flex", now "grid").
+                (b) .home-frame's base rule (height:30vh, max-height:260px,
+                overflow:hidden — sized for a one-slide mobile hero frame)
+                sits LATER in the file than the new matrix override; same
+                specificity (single class selector both sides) means
+                source order decides the tie, and the later rule was
+                winning regardless of the media query matching — grid
+                rows 2+ were being clipped/invisible. Also needed
+                `!important`. Both confirmed fixed by re-inspecting
+                computed styles after the change, not just re-screenshotting.
+                Auto-advance timer now checks matchMedia('(min-width:768px)')
+                once per buildCarousel() call (build-time check, not a
+                continuous resize listener) and skips entirely in matrix
+                mode — no point smooth-scrolling a carousel that isn't
+                scrollable anymore.
+
+                Verified: real headless Chrome, 3 viewport tiers (390/
+                768/1440px matching the three column counts exactly:
+                confirmed 1/2/3 columns via screenshot at each), all 5
+                tabs, real user data via actual file-picker import, 0
+                errors beyond the pre-existing unrelated Cloudflare/SW
+                CSP issues.
+
+  Empty-state/Month fixes (same round, real user screenshot): .empty-state
+  (Month/History's "nothing yet" screens) had ZERO layout CSS at all —
+  every rule was inline on children, so on a wide screen it sat
+  left-aligned with a huge blank page around it, looking broken. Added
+  centering CSS matching the already-correct .ins-empty pattern. Also
+  gave My Month's populated view (#mmBody) the same 680px capped-width
+  tier as Settings/Limits — same "single dashboard, not a repeated
+  grid" shape, was falling through with no treatment at all.
+
+  CRITICAL BUG (pre-existing, unrelated to responsive/matrix work — found
+  via real user report + real-browser diagnosis, not guessed): en-IN
+  locale's toLocaleDateString({month:'short'}) renders September as
+  "Sept" (4 letters) while all 11 other months are the standard 3-letter
+  abbreviation (confirmed by testing all 12 months directly). Every
+  transaction's stored month key came from _parseDateInput's fixed
+  3-letter array ("Sep 2026"), but ~18 call sites across app.js and the
+  bal/ files independently regenerated "current month" via the locale
+  API instead, producing "Sept 2026" — never matching. Result: Home's
+  bucket totals, My Month, Limits, and History's default-expanded month
+  all read as empty/₹0 for the real current month specifically whenever
+  that month is September, even though the transactions were saved
+  correctly underneath. This is why a September add looked like "nothing
+  refreshes" — it wasn't a refresh bug, it was a silent string mismatch.
+  FIXED: added MONTH_ABBR (fixed 3-letter array) to
+  js/bal/common/formatters.js; offsetMonthStr/offsetMonthLong/_fmtDate/
+  _fmtMonth and every other direct toLocaleDateString(month:'short')
+  call site (insight-generation.js's prevMonth, digest-and-alerts.js's
+  streak date-matching, parsing.js's today-check, plus ~10 sites in
+  app.js — current-month checks in Insights/History/Limits/month-end-
+  warning, and 3 source-record date stamps) now all use the same fixed
+  array. Also fixed a temporal-dead-zone bug this surfaced in
+  _parseDateInput's fallback (referenced `mn` before its `const`
+  declaration — was masked before since the fallback path is rarely hit).
+  ALSO FOUND, SAME DIAGNOSIS SESSION: buildHomeCarousels()'s cleanup
+  logic wrongly kept stale bucket/hint slides instead of removing them —
+  they get the SAME id string every render (positional: 'hBucketSlide'+i)
+  even though they're fresh DOM nodes each time, so the
+  `sourceIds.includes(ch.id)` fast-path always matched and skipped
+  removal. Every re-render appended another full set without clearing
+  the last one — confirmed via real-browser DOM inspection: one
+  add-transaction cycle took the bucket grid from 4 cards to 8, old
+  (stale-total) cards sitting alongside new ones. This pre-dates the
+  matrix-grid work — it was there in the one-at-a-time carousel too,
+  just invisible (you'd swipe past a duplicate without noticing, and
+  see more dots than expected); the matrix grid made it glaringly
+  visible by showing all cards simultaneously. FIXED: bucket/hint slides
+  now always get removed unconditionally in the cleanup pass (a fresh
+  replacement is appended right after anyway); AI-card singleton
+  park-if-unwanted behavior is unchanged. Both fixes verified via the
+  exact real-browser reproduction that found them, re-run after the fix:
+  offsetMonthStr(0) now returns "Sep 2026" matching stored data;
+  summary(currentMonth) now correctly shows the added ₹999; carousel
+  child count stays at 6 (2 AI cards + 4 buckets) instead of growing to
+  10; My Month screen shows real ₹500 total instead of "Nothing sorted
+  yet" after adding a transaction. Full 3-viewport/5-tab regression
+  swept clean, 0 errors, after both fixes.
+
+  Date picker (explicit user request, same root cause family): Add
+  Spend's date field was free-text (type="text", parsed via
+  _parseDateInput's string-splitting + a year-rollback heuristic).
+  User found a real edge: editing the pre-filled "03 Sept" down to
+  "02 Sept" could land on the wrong year via that heuristic. Converted
+  #addDate to a native <input type="date"> — eliminates the whole
+  parsing step, since the browser only ever returns a valid,
+  unambiguous ISO date (YYYY-MM-DD) or empty, never a partial/ambiguous
+  string. Added _parseISODate() (js/app.js, next to _parseDateInput,
+  which stays untouched — still used for other free-text date flows
+  elsewhere) to convert the ISO value straight into the app's internal
+  {date, month} shape. r_add()'s pre-fill now sets ISO format instead
+  of a locale month name. Verified: re-ran the exact reported scenario
+  (pre-filled 2026-09-03, changed day to 02) — saved transaction
+  correctly shows "02 Sep" / "Sep 2026", no year rollback. Full
+  regression swept clean, 0 errors.
 
   selSrc        inline styles not CSS class — changes must be in JS not CSS
   tags          may be absent on v1 records — always t.tags || []
@@ -1119,8 +1473,13 @@
             </div>
             <div class="add-sec" style="margin-bottom:0">
               <span class="add-lbl">DATE</span>
-              <input class="add-in" id="addDate" type="text" inputmode="text"
-                maxlength="20" placeholder="e.g. 23 Mar"
+              <!-- v7.1: was type="text" with free-text parsing via
+                   _parseDateInput — a year-rollback heuristic there could
+                   misfire (e.g. editing "03 Sept" down to "02 Sept" landed
+                   on the wrong year). Native date picker removes the whole
+                   parsing step: browser only ever returns a valid,
+                   unambiguous ISO date, no guessing needed. -->
+              <input class="add-in" id="addDate" type="date"
                 style="margin-bottom:0"
                 value="">
             </div>
@@ -1297,7 +1656,7 @@
   <div id="iBanner">
     <div class="ib-txt">Add Spend-na to your home screen for the best experience.</div>
     <button class="ib-install" id="iBannerBtn">Install</button>
-    <button class="ib-close" onclick="document.getElementById('iBanner').classList.remove('on')">✕</button>
+    <button class="ib-close" onclick="localStorage.setItem('sn_install_dismissed','1');document.getElementById('iBanner').classList.remove('on')">✕</button>
   </div>
 
   <!-- iOS Chrome → Safari nudge — shown every session on Chrome iOS -->
@@ -1315,7 +1674,35 @@
       style="background:none;border:none;color:var(--slate);font-size:16px;cursor:pointer;padding:4px;min-width:30px;min-height:30px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>
   </div>
 
+  <!-- v6.19-restructure: batches 1-8 — core/state.js (D/S); DAL
+       (storage.js: LS/DB/SRC_DB/SHARD/migrateData/SCHEMA_VERSION/tag
+       registry/debouncedSave/_commitSave/migrateTagsToRegistry/
+       _txnUpdate/_txnDelete; auth.js: md5/hashPw); BAL (formatters,
+       merchant-matching, duplicate-detection, ai-insights/*); UI
+       (render.js, swipe-actions.js). All plain classic scripts, same
+       global scope as app.js — not ES modules yet. Load order matters:
+       state before dal/bal/ui/app since later files read/reassign D. -->
+  <!-- v6.19-restructure batch 10: utils.js first — zero deps besides
+       window.ENV (already set by env-config.js above). -->
+  <script src="js/utils/utils.js"></script>
+  <script src="js/core/state.js"></script>
+  <script src="js/dal/common/storage.js"></script>
+  <script src="js/dal/common/auth.js"></script>
+  <script src="js/bal/common/formatters.js"></script>
+  <script src="js/bal/common/merchant-matching.js"></script>
+  <script src="js/bal/common/duplicate-detection.js"></script>
+  <script src="js/bal/ai-insights/forecast.js"></script>
+  <script src="js/bal/ai-insights/insight-generation.js"></script>
+  <script src="js/bal/ai-insights/budget-suggestions.js"></script>
+  <script src="js/bal/ai-insights/digest-and-alerts.js"></script>
+  <script src="js/bal/ai-insights/parsing.js"></script>
+  <script src="js/ui/common/render.js"></script>
+  <script src="js/ui/common/swipe-actions.js"></script>
+  <!-- v6.19-restructure batch 11 REVERTED — see PIB gotchas below for why.
+       app.js + app-init.js are plain classic scripts again, same as every
+       other extracted file, sharing one global scope with all of them. -->
   <script src="js/app.js"></script>
+  <script src="js/core/app-init.js"></script>
 
   <!-- sw.js registered from app.js; served as a real same-origin file (see NEW-001 in health report) -->
 </body>

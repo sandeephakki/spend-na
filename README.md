@@ -17,8 +17,10 @@ your-repo/
 ├── index.html       ← the app
 ├── manifest.json    ← PWA install metadata
 ├── sw.js            ← service worker (must be same-origin, see below)
-├── icon-192.png
-├── icon-512.png
+├── img/
+│   ├── icon.png
+│   ├── icon-192.png
+│   └── icon-512.png
 └── .nojekyll        ← stops GitHub Pages stripping files during Jekyll processing
 ```
 
